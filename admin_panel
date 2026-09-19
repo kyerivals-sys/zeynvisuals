@@ -1,0 +1,1369 @@
+--[[
+    ================================================================
+    SERVER CONSOLE UI - Roblox Script (v9.1 Verified & Robust Load)
+    Target Game: Steal An Egg
+    ================================================================
+--]]
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local UserService = game:GetService("UserService")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    LocalPlayer = Players.LocalPlayer
+end
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+----------------------------------------------------------------
+-- STATE VARIABLES
+----------------------------------------------------------------
+local TeleportBotActive = false
+local ActiveProfile = {
+    Name = LocalPlayer.Name,
+    DisplayName = LocalPlayer.DisplayName,
+    UserId = LocalPlayer.UserId,
+    AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150",
+    IsVerified = false
+}
+
+task.spawn(function()
+    pcall(function()
+        local info = UserService:GetUserInfosByUserIdsAsync({LocalPlayer.UserId})[1]
+        if info and info.HasVerifiedBadge then
+            ActiveProfile.IsVerified = true
+        end
+    end)
+end)
+
+
+----------------------------------------------------------------
+-- HELPER FUNCTIONS
+----------------------------------------------------------------
+local function ResolveUser(username)
+    username = tostring(username or ""):lower():gsub("%s+", "")
+    if username == "" then return nil end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Name:lower():find(username, 1, true) or p.DisplayName:lower():find(username, 1, true) then
+            local isVerified = false
+            pcall(function()
+                local info = UserService:GetUserInfosByUserIdsAsync({p.UserId})[1]
+                if info and info.HasVerifiedBadge then isVerified = true end
+            end)
+            return {
+                Name = p.Name,
+                DisplayName = p.DisplayName,
+                UserId = p.UserId,
+                IsVerified = isVerified,
+                Player = p
+            }
+        end
+    end
+
+    local success, userId = pcall(function()
+        return Players:GetUserIdFromNameAsync(username)
+    end)
+    if success and userId then
+        local isVerified = false
+        local actualName = username
+        local displayName = username
+        pcall(function()
+            local info = UserService:GetUserInfosByUserIdsAsync({userId})[1]
+            if info then
+                actualName = info.Username or username
+                displayName = info.DisplayName or actualName
+                if info.HasVerifiedBadge then isVerified = true end
+            end
+        end)
+        return {
+            Name = actualName,
+            DisplayName = displayName,
+            UserId = userId,
+            IsVerified = isVerified,
+            Player = nil
+        }
+    end
+
+    return nil
+end
+
+local function GetSafezoneCFrame()
+    local spawnLoc = workspace:FindFirstChild("SpawnLocation")
+    if spawnLoc and spawnLoc:IsA("BasePart") then
+        return spawnLoc.CFrame + Vector3.new(0, 4, 0)
+    end
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        local safe = map:FindFirstChild("SafeZone") or map:FindFirstChild("Safezone") or map:FindFirstChild("Spawn")
+        if safe then
+            return safe:IsA("BasePart") and safe.CFrame or safe:GetPivot()
+        end
+    end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return LocalPlayer.Character.HumanoidRootPart.CFrame
+    end
+    return CFrame.new(0, 50, 0)
+end
+
+----------------------------------------------------------------
+-- TOP BANNER SYSTEM
+----------------------------------------------------------------
+local function ShowGameTopBanner(avatarUrl, isVerified, textSegments)
+    local guiName = "ServerConsole_TopGameBanner"
+    local existing = PlayerGui:FindFirstChild(guiName)
+    if existing then existing:Destroy() end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = guiName
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 2000
+    sg.Parent = PlayerGui
+
+    -- Main Horizontal Container Frame
+    local container = Instance.new("Frame")
+    container.Name = "TopBannerContainer"
+    container.AutomaticSize = Enum.AutomaticSize.X
+    container.Size = UDim2.new(0, 0, 0, 68)
+    container.Position = UDim2.new(0.5, 0, 0, -90)
+    container.AnchorPoint = Vector2.new(0.5, 0)
+    container.BackgroundTransparency = 1
+    container.Parent = sg
+
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Horizontal
+    layout.VerticalAlignment = Enum.VerticalAlignment.Center
+    layout.Padding = UDim.new(0, 10)
+    layout.Parent = container
+
+    -- 1. ALWAYS ADD AVATAR HEADSHOT ON THE FAR LEFT (60x60px)
+    local avFrame = Instance.new("ImageLabel")
+    avFrame.Name = "AvatarHeadshot"
+    avFrame.Size = UDim2.new(0, 60, 0, 60)
+    avFrame.BackgroundTransparency = 1
+    avFrame.Image = avatarUrl or ("rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=420&h=420")
+    avFrame.Parent = container
+
+    -- 2. ADD VERIFIED BADGE (ONLY IF VERIFIED, 34x34px)
+    if isVerified then
+        local badge = Instance.new("ImageLabel")
+        badge.Name = "VerifiedBadge"
+        badge.Size = UDim2.new(0, 34, 0, 34)
+        badge.BackgroundTransparency = 1
+        badge.Image = "rbxassetid://10604506307"
+        badge.Parent = container
+    end
+
+    -- 3. ADD TEXT SEGMENTS WITH GOTHAMBLACK FONT & HEAVY OUTLINE (34px Text Size)
+    for _, seg in ipairs(textSegments) do
+        local txt = Instance.new("TextLabel")
+        txt.AutomaticSize = Enum.AutomaticSize.X
+        txt.Size = UDim2.new(0, 0, 1, 0)
+        txt.BackgroundTransparency = 1
+        txt.Font = Enum.Font.GothamBlack
+        txt.Text = seg.Text
+        txt.TextColor3 = seg.Color or Color3.fromRGB(255, 255, 255)
+        txt.TextSize = 34
+        txt.Parent = container
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(0, 0, 0)
+        stroke.Thickness = 5
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        stroke.Parent = txt
+    end
+
+    -- Drop down animation
+    local dropIn = TweenService:Create(container, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, 0, 0, 15)
+    })
+    dropIn:Play()
+
+    -- Sound chime
+    task.spawn(function()
+        local s = Instance.new("Sound")
+        s.SoundId = "rbxassetid://6026986407"
+        s.Volume = 0.85
+        s.Parent = SoundService
+        s:Play()
+        s.Ended:Connect(function() s:Destroy() end)
+    end)
+
+    -- Auto dismiss after 5s
+    task.delay(5, function()
+        if container and container.Parent then
+            local dropOut = TweenService:Create(container, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, 0, 0, -60)
+            })
+            dropOut:Play()
+            dropOut.Completed:Connect(function()
+                sg:Destroy()
+            end)
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- MAIN SERVER CONSOLE GUI
+----------------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ServerConsole_UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+if PlayerGui:FindFirstChild("ServerConsole_UI") then
+    PlayerGui.ServerConsole_UI:Destroy()
+end
+ScreenGui.Parent = PlayerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 680, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -340, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(40, 40, 40)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
+
+local Topbar = Instance.new("Frame")
+Topbar.Name = "Topbar"
+Topbar.Size = UDim2.new(1, 0, 0, 40)
+Topbar.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Topbar.BorderSizePixel = 0
+Topbar.Parent = MainFrame
+
+local TopbarCorner = Instance.new("UICorner")
+TopbarCorner.CornerRadius = UDim.new(0, 12)
+TopbarCorner.Parent = Topbar
+
+local TopbarFix = Instance.new("Frame")
+TopbarFix.Size = UDim2.new(1, 0, 0, 10)
+TopbarFix.Position = UDim2.new(0, 0, 1, -10)
+TopbarFix.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+TopbarFix.BorderSizePixel = 0
+TopbarFix.Parent = Topbar
+
+local IconLbl = Instance.new("TextLabel")
+IconLbl.Size = UDim2.new(0, 30, 1, 0)
+IconLbl.Position = UDim2.new(0, 12, 0, 0)
+IconLbl.BackgroundTransparency = 1
+IconLbl.Font = Enum.Font.Code
+IconLbl.Text = ">_"
+IconLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+IconLbl.TextSize = 18
+IconLbl.Parent = Topbar
+
+local TitleLbl = Instance.new("TextLabel")
+TitleLbl.Size = UDim2.new(0, 200, 1, 0)
+TitleLbl.Position = UDim2.new(0, 42, 0, 0)
+TitleLbl.BackgroundTransparency = 1
+TitleLbl.Font = Enum.Font.GothamBold
+TitleLbl.Text = "Server Console"
+TitleLbl.TextColor3 = Color3.fromRGB(240, 245, 255)
+TitleLbl.TextSize = 15
+TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+TitleLbl.Parent = Topbar
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -38, 0.5, -15)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 70)
+CloseBtn.BackgroundTransparency = 0.8
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 100, 120)
+CloseBtn.TextSize = 14
+CloseBtn.Parent = Topbar
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 30, 0, 30)
+MinBtn.Position = UDim2.new(1, -74, 0.5, -15)
+MinBtn.BackgroundColor3 = Color3.fromRGB(100, 110, 130)
+MinBtn.BackgroundTransparency = 0.8
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.Text = "-"
+MinBtn.TextColor3 = Color3.fromRGB(200, 210, 230)
+MinBtn.TextSize = 16
+MinBtn.Parent = Topbar
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(0, 6)
+MinCorner.Parent = MinBtn
+
+local BodyFrame = Instance.new("Frame")
+BodyFrame.Name = "BodyFrame"
+BodyFrame.Size = UDim2.new(1, -24, 1, -105)
+BodyFrame.Position = UDim2.new(0, 12, 0, 48)
+BodyFrame.BackgroundTransparency = 1
+BodyFrame.Parent = MainFrame
+
+local FooterFrame = Instance.new("Frame")
+FooterFrame.Name = "FooterFrame"
+FooterFrame.Size = UDim2.new(1, -24, 0, 42)
+FooterFrame.Position = UDim2.new(0, 12, 1, -50)
+FooterFrame.BackgroundTransparency = 1
+FooterFrame.Parent = MainFrame
+
+-- MINIMIZE TOGGLE
+local IsMinimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    IsMinimized = not IsMinimized
+    if IsMinimized then
+        BodyFrame.Visible = false
+        FooterFrame.Visible = false
+        MinBtn.Text = "+"
+        MainFrame:TweenSize(UDim2.new(0, 680, 0, 40), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+    else
+        MinBtn.Text = "-"
+        MainFrame:TweenSize(UDim2.new(0, 680, 0, 420), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+        task.delay(0.15, function()
+            if not IsMinimized then
+                BodyFrame.Visible = true
+                FooterFrame.Visible = true
+            end
+        end)
+    end
+end)
+
+local Dragging, DragInput, DragStart, StartPos
+Topbar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Dragging = true
+        DragStart = input.Position
+        StartPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                Dragging = false
+            end
+        end)
+    end
+end)
+Topbar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        DragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == DragInput and Dragging then
+        local delta = input.Position - DragStart
+        MainFrame.Position = UDim2.new(StartPos.X.Scale, StartPos.X.Offset + delta.X, StartPos.Y.Scale, StartPos.Y.Offset + delta.Y)
+    end
+end)
+
+local LogPanel = Instance.new("Frame")
+LogPanel.Name = "LogPanel"
+LogPanel.Size = UDim2.new(1, 0, 1, 0)
+LogPanel.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
+LogPanel.BorderSizePixel = 0
+LogPanel.Parent = BodyFrame
+local LogCorner = Instance.new("UICorner")
+LogCorner.CornerRadius = UDim.new(0, 8)
+LogCorner.Parent = LogPanel
+local LogStroke = Instance.new("UIStroke")
+LogStroke.Color = Color3.fromRGB(30, 30, 30)
+LogStroke.Thickness = 1
+LogStroke.Parent = LogPanel
+
+local LogScroll = Instance.new("ScrollingFrame")
+LogScroll.Name = "LogScroll"
+LogScroll.Size = UDim2.new(1, -12, 1, -12)
+LogScroll.Position = UDim2.new(0, 6, 0, 6)
+LogScroll.BackgroundTransparency = 1
+LogScroll.BorderSizePixel = 0
+LogScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+LogScroll.ScrollBarThickness = 4
+LogScroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+LogScroll.Parent = LogPanel
+
+local LogLayout = Instance.new("UIListLayout")
+LogLayout.SortOrder = Enum.SortOrder.LayoutOrder
+LogLayout.Padding = UDim.new(0, 4)
+LogLayout.Parent = LogScroll
+
+LogLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    LogScroll.CanvasSize = UDim2.new(0, 0, 0, LogLayout.AbsoluteContentSize.Y + 10)
+    LogScroll.CanvasPosition = Vector2.new(0, LogLayout.AbsoluteContentSize.Y)
+end)
+
+local LogCount = 0
+local function AddLog(msg, msgType)
+    LogCount = LogCount + 1
+    msgType = msgType or "INFO"
+    
+    local colors = {
+        INFO = Color3.fromRGB(210, 220, 240),
+        SUCCESS = Color3.fromRGB(80, 230, 140),
+        ADMIN = Color3.fromRGB(255, 205, 70),
+        WARNING = Color3.fromRGB(255, 160, 60),
+        ERROR = Color3.fromRGB(255, 90, 90),
+        SYSTEM = Color3.fromRGB(170, 120, 255)
+    }
+    local color = colors[msgType] or colors.INFO
+
+    local timestamp = os.date("%H:%M:%S")
+    local logItem = Instance.new("TextLabel")
+    logItem.Size = UDim2.new(1, -10, 0, 0)
+    logItem.AutomaticSize = Enum.AutomaticSize.Y
+    logItem.BackgroundTransparency = 1
+    logItem.Font = Enum.Font.Code
+    logItem.Text = string.format("[%s] [%s] %s", timestamp, msgType, msg)
+    logItem.TextColor3 = color
+    logItem.TextSize = 12
+    logItem.TextWrapped = true
+    logItem.TextXAlignment = Enum.TextXAlignment.Left
+    logItem.LayoutOrder = LogCount
+    logItem.Parent = LogScroll
+end
+
+local InputBg = Instance.new("Frame")
+InputBg.Size = UDim2.new(1, -172, 1, 0)
+InputBg.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
+InputBg.BorderSizePixel = 0
+InputBg.Parent = FooterFrame
+local InputCorner = Instance.new("UICorner")
+InputCorner.CornerRadius = UDim.new(0, 8)
+InputCorner.Parent = InputBg
+local InputStroke = Instance.new("UIStroke")
+InputStroke.Color = Color3.fromRGB(40, 40, 40)
+InputStroke.Thickness = 1
+InputStroke.Parent = InputBg
+
+local CmdPrompt = Instance.new("TextLabel")
+CmdPrompt.Size = UDim2.new(0, 24, 1, 0)
+CmdPrompt.Position = UDim2.new(0, 8, 0, 0)
+CmdPrompt.BackgroundTransparency = 1
+CmdPrompt.Font = Enum.Font.Code
+CmdPrompt.Text = ">"
+CmdPrompt.TextColor3 = Color3.fromRGB(200, 200, 200)
+CmdPrompt.TextSize = 16
+CmdPrompt.Parent = InputBg
+
+local CmdTextBox = Instance.new("TextBox")
+CmdTextBox.Name = "CmdTextBox"
+CmdTextBox.Size = UDim2.new(1, -36, 1, 0)
+CmdTextBox.Position = UDim2.new(0, 30, 0, 0)
+CmdTextBox.BackgroundTransparency = 1
+CmdTextBox.Font = Enum.Font.Code
+CmdTextBox.PlaceholderText = "Enter command (e.g. spawnegg Kraken 5, teleport Ben, setrole CREATOR)..."
+CmdTextBox.PlaceholderColor3 = Color3.fromRGB(90, 100, 120)
+CmdTextBox.Text = ""
+CmdTextBox.TextColor3 = Color3.fromRGB(240, 245, 255)
+CmdTextBox.TextSize = 13
+CmdTextBox.TextXAlignment = Enum.TextXAlignment.Left
+CmdTextBox.ClearTextOnFocus = false
+CmdTextBox.Parent = InputBg
+
+local RunBtn = Instance.new("TextButton")
+RunBtn.Size = UDim2.new(0, 100, 1, 0)
+RunBtn.Position = UDim2.new(1, -172, 0, 0)
+RunBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+RunBtn.BorderSizePixel = 0
+RunBtn.Font = Enum.Font.GothamBold
+RunBtn.Text = "EXECUTE"
+RunBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+RunBtn.TextSize = 12
+RunBtn.Parent = FooterFrame
+local RunCorner = Instance.new("UICorner")
+RunCorner.CornerRadius = UDim.new(0, 8)
+RunCorner.Parent = RunBtn
+
+local ClearBtn = Instance.new("TextButton")
+ClearBtn.Size = UDim2.new(0, 64, 1, 0)
+ClearBtn.Position = UDim2.new(1, -64, 0, 0)
+ClearBtn.BackgroundColor3 = Color3.fromRGB(35, 40, 55)
+ClearBtn.BorderSizePixel = 0
+ClearBtn.Font = Enum.Font.GothamBold
+ClearBtn.Text = "CLEAR"
+ClearBtn.TextColor3 = Color3.fromRGB(160, 170, 190)
+ClearBtn.TextSize = 11
+ClearBtn.Parent = FooterFrame
+local ClearCorner = Instance.new("UICorner")
+ClearCorner.CornerRadius = UDim.new(0, 8)
+ClearCorner.Parent = ClearBtn
+
+ClearBtn.MouseButton1Click:Connect(function()
+    for _, child in ipairs(LogScroll:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+    AddLog("Console output cleared.", "SYSTEM")
+end)
+
+----------------------------------------------------------------
+-- FEATURE 1: SPAWNEGG (2X Scale, Non-collidable, Grid Placement)
+----------------------------------------------------------------
+local CreatedEggsFolder = workspace:FindFirstChild("ServerConsole_SpawnedEggs")
+if not CreatedEggsFolder then
+    CreatedEggsFolder = Instance.new("Folder")
+    CreatedEggsFolder.Name = "ServerConsole_SpawnedEggs"
+    CreatedEggsFolder.Parent = workspace
+end
+
+local function FindAndSpawnEgg(eggName, amount)
+    amount = tonumber(amount) or 1
+    if amount < 1 then amount = 1 end
+    if amount > 100 then amount = 100 end
+
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        AddLog("Character root part not found!", "ERROR")
+        return
+    end
+
+    local hrp = character.HumanoidRootPart
+    eggName = eggName:lower()
+
+    local foundModel = nil
+    local eggStorage = ReplicatedStorage:FindFirstChild("Assets") 
+        and ReplicatedStorage.Assets:FindFirstChild("Models") 
+        and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs")
+
+    if eggStorage then
+        for _, child in ipairs(eggStorage:GetChildren()) do
+            if child.Name:lower():find(eggName, 1, true) then
+                foundModel = child
+                break
+            end
+        end
+    end
+
+    if not foundModel then
+        AddLog("egg not found", "ERROR")
+        return
+    end
+
+    local formattedEggTitle = foundModel.Name
+    AddLog(string.format("Spawning x%d '%s' (non-collidable)...", amount, formattedEggTitle), "INFO")
+
+    local spacingX = 10.0
+    local spacingZ = 10.0
+    local maxPerRow = 10
+    local spawnedCount = 0
+
+    for i = 1, amount do
+        local eggClone = foundModel:Clone()
+
+        -- Make egg x2 bigger
+        pcall(function()
+            if eggClone:IsA("Model") then
+                eggClone:ScaleTo(2)
+            elseif eggClone:IsA("BasePart") then
+                eggClone.Size = eggClone.Size * 2
+            end
+        end)
+
+        for _, p in ipairs(eggClone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.Anchored = true
+            end
+        end
+
+        -- Grid placement math: max 10 per row
+        local rowIndex = math.floor((i - 1) / maxPerRow)
+        local colIndex = (i - 1) % maxPerRow
+        local itemsInThisRow = math.min(maxPerRow, amount - rowIndex * maxPerRow)
+
+        local startX = -((itemsInThisRow - 1) * spacingX) / 2
+        local xOffset = startX + colIndex * spacingX
+        local zOffset = -10 - (rowIndex * spacingZ)
+
+        local eggCFrame = hrp.CFrame * CFrame.new(xOffset, 1.0, zOffset)
+
+        if eggClone:IsA("Model") then
+            if not eggClone.PrimaryPart then
+                for _, p in ipairs(eggClone:GetDescendants()) do
+                    if p:IsA("BasePart") then eggClone.PrimaryPart = p break end
+                end
+            end
+            if eggClone.PrimaryPart then
+                eggClone:PivotTo(eggCFrame)
+            end
+        elseif eggClone:IsA("BasePart") then
+            eggClone.CFrame = eggCFrame
+        end
+
+        eggClone.Parent = CreatedEggsFolder
+        spawnedCount = spawnedCount + 1
+    end
+
+    local textSegments = {
+        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = string.format("spawned %d ", spawnedCount), Color = Color3.fromRGB(255, 255, 255) },
+        { Text = formattedEggTitle .. "!", Color = Color3.fromRGB(255, 225, 0) }
+    }
+
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
+    AddLog(string.format("Spawned x%d '%s' (Grid: max 10/row)!", spawnedCount, formattedEggTitle), "SUCCESS")
+end
+
+----------------------------------------------------------------
+-- FEATURE 2: TELEPORT BOT (2s to Egg, 2s Stay, 2s Return & Disappearing Egg)
+----------------------------------------------------------------
+local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
+    local botModel = nil
+
+    if targetUserId then
+        local ok, model = pcall(function()
+            return Players:CreateHumanoidModelFromUserId(targetUserId)
+        end)
+        if ok and model then
+            botModel = model
+        end
+    end
+
+    if not botModel then
+        botModel = Instance.new("Model")
+        
+        local hrp = Instance.new("Part")
+        hrp.Name = "HumanoidRootPart"
+        hrp.Size = Vector3.new(2, 2, 1)
+        hrp.Transparency = 1
+        hrp.CanCollide = false
+        hrp.Anchored = true
+        hrp.Parent = botModel
+
+        local head = Instance.new("Part")
+        head.Name = "Head"
+        head.Size = Vector3.new(1.2, 1.2, 1.2)
+        head.Color = Color3.fromRGB(255, 220, 180)
+        head.CanCollide = false
+        head.Parent = botModel
+
+        local torso = Instance.new("Part")
+        torso.Name = "Torso"
+        torso.Size = Vector3.new(2, 2, 1)
+        torso.Color = Color3.fromRGB(0, 170, 255)
+        torso.CanCollide = false
+        torso.Parent = botModel
+
+        local leftArm = Instance.new("Part")
+        leftArm.Name = "Left Arm"
+        leftArm.Size = Vector3.new(1, 2, 1)
+        leftArm.Color = Color3.fromRGB(255, 220, 180)
+        leftArm.CanCollide = false
+        leftArm.Parent = botModel
+
+        local rightArm = Instance.new("Part")
+        rightArm.Name = "Right Arm"
+        rightArm.Size = Vector3.new(1, 2, 1)
+        rightArm.Color = Color3.fromRGB(255, 220, 180)
+        rightArm.CanCollide = false
+        rightArm.Parent = botModel
+
+        local leftLeg = Instance.new("Part")
+        leftLeg.Name = "Left Leg"
+        leftLeg.Size = Vector3.new(1, 2, 1)
+        leftLeg.Color = Color3.fromRGB(40, 40, 50)
+        leftLeg.CanCollide = false
+        leftLeg.Parent = botModel
+
+        local rightLeg = Instance.new("Part")
+        rightLeg.Name = "Right Leg"
+        rightLeg.Size = Vector3.new(1, 2, 1)
+        rightLeg.Color = Color3.fromRGB(40, 40, 50)
+        rightLeg.CanCollide = false
+        rightLeg.Parent = botModel
+
+        torso.CFrame = hrp.CFrame
+        head.CFrame = hrp.CFrame * CFrame.new(0, 1.5, 0)
+        leftArm.CFrame = hrp.CFrame * CFrame.new(-1.5, 0, 0)
+        rightArm.CFrame = hrp.CFrame * CFrame.new(1.5, 0, 0)
+        leftLeg.CFrame = hrp.CFrame * CFrame.new(-0.5, -2, 0)
+        rightLeg.CFrame = hrp.CFrame * CFrame.new(0.5, -2, 0)
+
+        local bodyParts = { head, torso, leftArm, rightArm, leftLeg, rightLeg }
+        for _, part in ipairs(bodyParts) do
+            local weld = Instance.new("WeldConstraint")
+            weld.Part0 = hrp
+            weld.Part1 = part
+            weld.Parent = hrp
+        end
+
+        local hum = Instance.new("Humanoid")
+        hum.Parent = botModel
+
+        if targetUserId then
+            pcall(function()
+                local humDesc = Players:GetHumanoidDescriptionFromUserId(targetUserId)
+                if humDesc then hum:ApplyDescription(humDesc) end
+            end)
+        end
+    end
+
+    botModel.Name = targetName
+
+    local hrp = botModel:FindFirstChild("HumanoidRootPart") or botModel.PrimaryPart
+    if not hrp then
+        hrp = Instance.new("Part")
+        hrp.Name = "HumanoidRootPart"
+        hrp.Size = Vector3.new(2, 2, 1)
+        hrp.Transparency = 1
+        hrp.CanCollide = false
+        hrp.Parent = botModel
+        botModel.PrimaryPart = hrp
+    else
+        botModel.PrimaryPart = hrp
+    end
+
+    for _, p in ipairs(botModel:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.CanCollide = false
+        end
+    end
+
+    hrp.Anchored = true
+    botModel:PivotTo(safeCFrame)
+
+    -- Native Roblox Humanoid Nametag
+    local hum = botModel:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = 80
+        hum.DisplayName = targetName
+        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
+        hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+    end
+
+    return botModel
+end
+
+local ActiveBotModels = {}
+
+local function ToggleTeleportBot(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        AddLog("Usage: teleport <robloxusername>", "ERROR")
+        return
+    end
+
+    if targetUsername:lower() == "clear" or targetUsername:lower() == "stop" then
+        for bot, _ in pairs(ActiveBotModels) do
+            if bot and bot.Parent then bot:Destroy() end
+        end
+        ActiveBotModels = {}
+        AddLog("All active steal bots cleared.", "WARNING")
+        return
+    end
+
+    local userRes = ResolveUser(targetUsername)
+    local targetName = userRes and userRes.Name or targetUsername
+    local targetUserId = userRes and userRes.UserId or LocalPlayer.UserId
+    local isVerified = userRes and userRes.IsVerified or false
+    local avatarUrl = "rbxthumb://type=AvatarHeadShot&id=" .. targetUserId .. "&w=150&h=150"
+
+    TeleportBotActive = true
+
+    -- TOP BANNER ANNOUNCEMENT FOR TELEPORT BOT
+    local textSegments = {
+        { Text = targetName .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = "teleported to the server!", Color = Color3.fromRGB(255, 255, 255) }
+    }
+    ShowGameTopBanner(avatarUrl, isVerified, textSegments)
+
+    AddLog(string.format("%s teleported to the server", targetName), "SUCCESS")
+
+    local safeCFrame = GetSafezoneCFrame()
+    local botModel = CreateBotCharacter(safeCFrame, targetName, targetUserId)
+    botModel.Parent = workspace
+    ActiveBotModels[botModel] = true
+
+    local hum = botModel:FindFirstChildOfClass("Humanoid")
+    local anim = Instance.new("Animation")
+    if hum and hum.RigType == Enum.HumanoidRigType.R15 then
+        anim.AnimationId = "rbxassetid://913376044"
+    else
+        anim.AnimationId = "rbxassetid://180436334"
+    end
+
+    local animator = hum and (hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum))
+    local runTrack = nil
+    if animator then
+        pcall(function()
+            runTrack = animator:LoadAnimation(anim)
+            runTrack.Looped = true
+        end)
+    end
+
+    local function PlayRunAnim()
+        if runTrack and not runTrack.IsPlaying then
+            pcall(function() runTrack:Play() end)
+        end
+    end
+
+    local function StopRunAnim()
+        if runTrack and runTrack.IsPlaying then
+            pcall(function() runTrack:Stop() end)
+        end
+    end
+
+    task.spawn(function()
+        local stolenCount = 0
+        while botModel and botModel.Parent do
+            local targetEggs = {}
+
+            if CreatedEggsFolder then
+                for _, egg in ipairs(CreatedEggsFolder:GetChildren()) do
+                    table.insert(targetEggs, egg)
+                end
+            end
+
+            if workspace:FindFirstChild("PlacedEggRenders") then
+                for _, eggRender in ipairs(workspace.PlacedEggRenders:GetChildren()) do
+                    if targetUserId and eggRender.Name:find(tostring(targetUserId)) then
+                        table.insert(targetEggs, eggRender)
+                    elseif eggRender.Name:lower():find(targetName:lower()) then
+                        table.insert(targetEggs, eggRender)
+                    end
+                end
+            end
+
+            if #targetEggs > 0 then
+                -- Shuffle targetEggs table (Random Steal Order)
+                for idx = #targetEggs, 2, -1 do
+                    local r = math.random(idx)
+                    targetEggs[idx], targetEggs[r] = targetEggs[r], targetEggs[idx]
+                end
+
+                for _, egg in ipairs(targetEggs) do
+                    if not (botModel and botModel.Parent) then break end
+                    local eggPos = egg:IsA("Model") and (egg.PrimaryPart and egg.PrimaryPart.CFrame or egg:GetPivot()) or (egg:IsA("BasePart") and egg.CFrame)
+                    if eggPos then
+                        PlayRunAnim()
+
+                        local startPos = botModel:GetPivot()
+                        local travelTime = 2.0 -- Exactly 2 seconds duration to reach egg
+                        local startTime = os.clock()
+
+                        while (os.clock() - startTime) < travelTime and botModel and botModel.Parent do
+                            local alpha = math.min(1, (os.clock() - startTime) / travelTime)
+                            local curPos = startPos.Position:Lerp(eggPos.Position, alpha)
+                            local lookCFrame = CFrame.lookAt(curPos, Vector3.new(eggPos.Position.X, curPos.Y, eggPos.Position.Z))
+                            botModel:PivotTo(lookCFrame)
+                            task.wait()
+                        end
+
+                        if not (botModel and botModel.Parent) then break end
+
+                        -- Stay 2 seconds at the egg before picking it up
+                        StopRunAnim()
+                        task.wait(2.0)
+
+                        if not (botModel and botModel.Parent) then break end
+
+                        PlayRunAnim()
+                        local carryingEgg = true
+                        task.spawn(function()
+                            while carryingEgg and egg and egg.Parent and botModel and botModel.Parent do
+                                local carryCFrame = botModel:GetPivot() * CFrame.new(0, -0.2, -7.5)
+                                if egg:IsA("Model") then
+                                    egg:PivotTo(carryCFrame)
+                                elseif egg:IsA("BasePart") then
+                                    egg.CFrame = carryCFrame
+                                end
+                                task.wait()
+                            end
+                        end)
+
+                        travelTime = 2.0 -- Exactly 2 seconds duration to return egg to safezone
+                        startTime = os.clock()
+                        local carryStartPos = botModel:GetPivot()
+
+                        while (os.clock() - startTime) < travelTime and botModel and botModel.Parent do
+                            local alpha = math.min(1, (os.clock() - startTime) / travelTime)
+                            local curPos = carryStartPos.Position:Lerp(safeCFrame.Position, alpha)
+                            local lookCFrame = CFrame.lookAt(curPos, Vector3.new(safeCFrame.Position.X, curPos.Y, safeCFrame.Position.Z))
+                            botModel:PivotTo(lookCFrame)
+                            task.wait()
+                        end
+
+                        carryingEgg = false
+                        StopRunAnim()
+                        task.wait(0.05)
+
+                        -- DISAPPEAR / DESTROY STOLEN EGG IN SAFEZONE
+                        if egg and egg.Parent then
+                            egg:Destroy()
+                        end
+
+                        stolenCount = stolenCount + 1
+                    end
+                end
+            else
+                -- No target eggs left: auto deactivate bot cleanly
+                StopRunAnim()
+                if botModel and botModel.Parent then
+                    botModel:Destroy()
+                end
+                ActiveBotModels[botModel] = nil
+                break
+            end
+            task.wait(0.2)
+        end
+        StopRunAnim()
+    end)
+end
+
+----------------------------------------------------------------
+-- FEATURE 3: ANNOUNCE (Matching Game Top Banner)
+----------------------------------------------------------------
+local function ExecAnnounce(msgText)
+    if not msgText or msgText == "" then
+        AddLog("Usage: announce <message>", "ERROR")
+        return
+    end
+
+    local textSegments = {
+        { Text = " : " .. msgText, Color = Color3.fromRGB(255, 255, 255) }
+    }
+
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
+    AddLog(string.format("Broadcasted announcement: \"%s: %s\"", ActiveProfile.Name, msgText), "SUCCESS")
+end
+
+----------------------------------------------------------------
+-- FEATURE 4: GIVEADMIN (Matching Game Top Banner)
+----------------------------------------------------------------
+local function ExecGiveAdmin(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        AddLog("Usage: giveadmin <robloxusername>", "ERROR")
+        return
+    end
+
+    local userRes = ResolveUser(targetUsername)
+    local targetName = userRes and userRes.Name or targetUsername
+
+    local textSegments = {
+        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = "gave admin to ", Color = Color3.fromRGB(255, 255, 255) },
+        { Text = targetName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+    }
+
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
+
+    local statusVerified = (userRes and userRes.IsVerified) and "[VERIFIED TARGET]" or "[REGULAR TARGET]"
+    AddLog(string.format("GiveAdminExecuted: '%s' gave admin to '%s' %s", ActiveProfile.Name, targetName, statusVerified), "ADMIN")
+end
+
+----------------------------------------------------------------
+-- FEATURE 5: GIVEPS (Matching Game Top Banner)
+----------------------------------------------------------------
+local function ExecGivePS(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        AddLog("Usage: giveps <robloxusername>", "ERROR")
+        return
+    end
+
+    local userRes = ResolveUser(targetUsername)
+    local targetName = userRes and userRes.Name or targetUsername
+
+    local textSegments = {
+        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = "gave private server to ", Color = Color3.fromRGB(255, 255, 255) },
+        { Text = targetName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+    }
+
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
+
+    local statusVerified = (userRes and userRes.IsVerified) and "[VERIFIED TARGET]" or "[REGULAR TARGET]"
+    AddLog(string.format("GivePSExecuted: '%s' gave private server to '%s' %s", ActiveProfile.Name, targetName, statusVerified), "ADMIN")
+end
+
+----------------------------------------------------------------
+-- FEATURE 6: SETPROFILE (Identity Change)
+----------------------------------------------------------------
+local function ExecSetProfile(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        AddLog("Usage: setprofile <robloxusername>", "ERROR")
+        return
+    end
+
+    AddLog(string.format("Fetching profile for '%s'...", targetUsername), "INFO")
+
+    task.spawn(function()
+        local userRes = ResolveUser(targetUsername)
+        if not userRes then
+            AddLog(string.format("Could not resolve user '%s'", targetUsername), "ERROR")
+            return
+        end
+
+        ActiveProfile.Name = userRes.Name
+        ActiveProfile.DisplayName = userRes.DisplayName
+        ActiveProfile.UserId = userRes.UserId
+        ActiveProfile.AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. userRes.UserId .. "&w=150&h=150"
+        ActiveProfile.IsVerified = userRes.IsVerified
+
+        local verStr = userRes.IsVerified and "YES (Verified Badge Detected)" or "NO"
+        AddLog(string.format("Active Profile changed to '%s' (UserId: %d | Verified: %s)", userRes.Name, userRes.UserId, verStr), "SUCCESS")
+    end)
+end
+
+----------------------------------------------------------------
+-- FEATURE 7: SETROLE (Overhead Title: CREATOR=RED, DEVELOPER=BLUE, ADMIN=ORANGE)
+----------------------------------------------------------------
+local CurrentOverheadRole = nil
+
+local RoleColorMap = {
+    CREATOR = Color3.fromRGB(230, 45, 45),    -- RED
+    DEVELOPER = Color3.fromRGB(0, 170, 255),  -- BLUE
+    ADMIN = Color3.fromRGB(255, 140, 0)       -- ORANGE
+}
+
+local function ApplyOverheadRole(roleName)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+
+    local existing = head:FindFirstChild("ServerConsole_OverheadRole")
+    if existing then existing:Destroy() end
+
+    if not roleName or roleName == "" then return end
+
+    local color = RoleColorMap[roleName] or Color3.fromRGB(255, 255, 255)
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ServerConsole_OverheadRole"
+    bb.Size = UDim2.new(0, 200, 0, 40)
+    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = head
+
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1, 0, 1, 0)
+    txt.BackgroundTransparency = 1
+    txt.Font = Enum.Font.GothamBlack
+    txt.Text = "[" .. roleName .. "]"
+    txt.TextColor3 = color
+    txt.TextSize = 22
+    txt.Parent = bb
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 3
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+    stroke.Parent = txt
+end
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    if CurrentOverheadRole then
+        task.delay(0.5, function()
+            ApplyOverheadRole(CurrentOverheadRole)
+        end)
+    end
+end)
+
+local function ExecSetRole(roleInput)
+    if not roleInput or roleInput == "" then
+        AddLog("Usage: setrole CREATOR | DEVELOPER | ADMIN", "ERROR")
+        return
+    end
+
+    local cleanRole = roleInput:upper():gsub("%s+", "")
+    if cleanRole == "NONE" or cleanRole == "CLEAR" or cleanRole == "REMOVE" then
+        CurrentOverheadRole = nil
+        ApplyOverheadRole(nil)
+        AddLog("Overhead role cleared.", "WARNING")
+        return
+    end
+
+    if not RoleColorMap[cleanRole] then
+        AddLog(string.format("Invalid role '%s'. Available roles: CREATOR (Red), DEVELOPER (Blue), ADMIN (Orange)", roleInput), "ERROR")
+        return
+    end
+
+    CurrentOverheadRole = cleanRole
+    ApplyOverheadRole(cleanRole)
+    AddLog(string.format("Set overhead role to '%s'!", cleanRole), "SUCCESS")
+end
+
+----------------------------------------------------------------
+-- FEATURE 8: MORPH (Copy Roblox User Avatar & Accessories)
+----------------------------------------------------------------
+local function ExecMorph(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        AddLog("Usage: morph <robloxusername>", "ERROR")
+        return
+    end
+
+    AddLog(string.format("Morphing avatar into '%s'...", targetUsername), "INFO")
+
+    task.spawn(function()
+        local userRes = ResolveUser(targetUsername)
+        if not userRes then
+            AddLog(string.format("Could not resolve user '%s'", targetUsername), "ERROR")
+            return
+        end
+
+        local char = LocalPlayer.Character
+        if not char or not char:FindFirstChildOfClass("Humanoid") then
+            AddLog("Local character or Humanoid not found!", "ERROR")
+            return
+        end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+        if not hrp then
+            AddLog("HumanoidRootPart not found!", "ERROR")
+            return
+        end
+
+        -- Method 1: Native ApplyDescription
+        pcall(function()
+            local humDesc = Players:GetHumanoidDescriptionFromUserId(userRes.UserId)
+            if humDesc then
+                hum:ApplyDescription(humDesc)
+            end
+        end)
+
+        -- Method 2: Full 3D Asset & Accessory Transfer
+        local okModel, targetModel = pcall(function()
+            return Players:CreateHumanoidModelFromUserId(userRes.UserId)
+        end)
+
+        if okModel and targetModel then
+            pcall(function()
+                local targetHrp = targetModel:FindFirstChild("HumanoidRootPart") or targetModel.PrimaryPart
+                if not targetHrp then targetHrp = targetModel:FindFirstChild("Torso") or targetModel:FindFirstChild("UpperTorso") end
+
+                local charPivot = char:GetPivot()
+                targetModel:PivotTo(charPivot)
+
+                -- Clear existing local character accessories & classic clothing
+                for _, item in ipairs(char:GetChildren()) do
+                    if item:IsA("Accessory") or item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") or item:IsA("CharacterMesh") then
+                        item:Destroy()
+                    end
+                end
+
+                -- Transfer BodyColors, Shirts, Pants, ShirtGraphic, CharacterMeshes
+                for _, item in ipairs(targetModel:GetChildren()) do
+                    if item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") or item:IsA("CharacterMesh") then
+                        item:Clone().Parent = char
+                    end
+                end
+
+                -- Transfer Head face decal and head mesh (SpecialMesh)
+                local head = char:FindFirstChild("Head")
+                local targetHead = targetModel:FindFirstChild("Head")
+
+                if head then
+                    for _, child in ipairs(head:GetChildren()) do
+                        if child:IsA("Decal") or child:IsA("SpecialMesh") then
+                            child:Destroy()
+                        end
+                    end
+                end
+
+                if head and targetHead then
+                    for _, child in ipairs(targetHead:GetChildren()) do
+                        if child:IsA("Decal") or child:IsA("SpecialMesh") then
+                            child:Clone().Parent = head
+                        end
+                    end
+                end
+
+                -- Transfer MeshPart visuals for body parts
+                for _, targetPart in ipairs(targetModel:GetChildren()) do
+                    if targetPart:IsA("MeshPart") and char:FindFirstChild(targetPart.Name) then
+                        local charPart = char[targetPart.Name]
+                        pcall(function()
+                            if charPart:IsA("MeshPart") then
+                                charPart.MeshId = targetPart.MeshId
+                                charPart.TextureID = targetPart.TextureID
+                                charPart.Color = targetPart.Color
+                                charPart.Transparency = targetPart.Transparency
+                            end
+                        end)
+                    end
+                end
+
+                -- Transfer ALL 3D Accessories
+                for _, item in ipairs(targetModel:GetChildren()) do
+                    if item:IsA("Accessory") then
+                        local accClone = item:Clone()
+
+                        for _, desc in ipairs(accClone:GetDescendants()) do
+                            if desc:IsA("Weld") or desc:IsA("WeldConstraint") or desc:IsA("Motor6D") then
+                                desc:Destroy()
+                            end
+                        end
+
+                        local handle = accClone:FindFirstChild("Handle")
+                        if handle and handle:IsA("BasePart") then
+                            handle.CanCollide = false
+                            handle.Anchored = false
+
+                            local handleAtt = handle:FindFirstChildWhichIsA("Attachment")
+                            local charAtt = nil
+
+                            if handleAtt then
+                                charAtt = char:FindFirstChild(handleAtt.Name, true)
+                            end
+
+                            if charAtt and charAtt.Parent and charAtt.Parent:IsA("BasePart") then
+                                local bodyPart = charAtt.Parent
+                                handle.CFrame = charAtt.WorldCFrame * handleAtt.CFrame:Inverse()
+
+                                local weld = Instance.new("Weld")
+                                weld.Name = "AccessoryWeld"
+                                weld.Part0 = bodyPart
+                                weld.Part1 = handle
+                                weld.C0 = charAtt.CFrame
+                                weld.C1 = handleAtt.CFrame
+                                weld.Parent = handle
+                            else
+                                local origHandle = item:FindFirstChild("Handle")
+                                if origHandle and targetHrp then
+                                    local relCFrame = targetHrp.CFrame:ToObjectSpace(origHandle.CFrame)
+                                    handle.CFrame = hrp.CFrame * relCFrame
+
+                                    local weld = Instance.new("WeldConstraint")
+                                    weld.Part0 = hrp
+                                    weld.Part1 = handle
+                                    weld.Parent = handle
+                                end
+                            end
+
+                            accClone.Parent = char
+                        end
+                    end
+                end
+
+                -- Synchronize Humanoid Body Scale values
+                local targetHum = targetModel:FindFirstChildOfClass("Humanoid")
+                if targetHum then
+                    for _, prop in ipairs({"HeadScale", "BodyHeightScale", "BodyWidthScale", "BodyDepthScale", "BodyTypeScale", "Proportion"}) do
+                        local targetVal = targetHum:FindFirstChild(prop)
+                        if targetVal and targetVal:IsA("NumberValue") then
+                            local myVal = hum:FindFirstChild(prop)
+                            if myVal and myVal:IsA("NumberValue") then
+                                myVal.Value = targetVal.Value
+                            end
+                        end
+                    end
+                end
+            end)
+
+            targetModel:Destroy()
+        end
+
+        AddLog(string.format("Successfully morphed avatar into '%s'!", userRes.Name), "SUCCESS")
+    end)
+end
+
+----------------------------------------------------------------
+-- FEATURE 9: HELP MANUAL & COMMAND PROCESSOR
+----------------------------------------------------------------
+local function ExecHelp()
+    AddLog("==================== SERVER CONSOLE COMMANDS ====================", "SYSTEM")
+    AddLog("1. spawnegg <name> [amount]", "INFO")
+    AddLog("   -> Spawns 2X non-collidable eggs (max 10/row)", "INFO")
+    AddLog("2. teleport <robloxusername>", "INFO")
+    AddLog("   -> Spawns bot that steals eggs back to safezone (use 'teleport clear' to remove all)", "INFO")
+    AddLog("3. announce <message>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [Verified Badge] : [message]", "INFO")
+    AddLog("4. giveadmin <robloxusername>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [Verified Badge] [User] gave admin to [Target]!", "INFO")
+    AddLog("5. giveps <robloxusername>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [Verified Badge] [User] gave private server to [Target]!", "INFO")
+    AddLog("6. setprofile <robloxusername>", "INFO")
+    AddLog("   -> Sets announcement identity & badge data without morphing avatar", "INFO")
+    AddLog("7. setrole <CREATOR | DEVELOPER | ADMIN>", "INFO")
+    AddLog("   -> Displays colored role title overhead above your character", "INFO")
+    AddLog("8. morph <robloxusername>", "INFO")
+    AddLog("   -> Morphs your character avatar into <robloxusername>", "INFO")
+    AddLog("9. /help", "INFO")
+    AddLog("   -> Displays this command catalog manual", "INFO")
+    AddLog("==================================================================", "SYSTEM")
+end
+
+local function ProcessCommand(fullCmd)
+    fullCmd = fullCmd:match("^%s*(.-)%s*$")
+    if fullCmd == "" then return end
+
+    AddLog("> " .. fullCmd, "INFO")
+    
+    local args = {}
+    for word in fullCmd:gmatch("%S+") do
+        table.insert(args, word)
+    end
+
+    local cmd = args[1]:lower()
+
+    if cmd == "spawnegg" then
+        local eggName = args[2] or "Egg"
+        local amount = args[3] or 1
+        if tonumber(args[2]) and not tonumber(args[3]) then
+            amount = args[2]
+            eggName = args[3]
+        end
+        FindAndSpawnEgg(eggName, amount)
+    elseif cmd == "teleport" then
+        local target = args[2] or ""
+        ToggleTeleportBot(target)
+    elseif cmd == "announce" then
+        local msgText = table.concat(args, " ", 2)
+        ExecAnnounce(msgText)
+    elseif cmd == "giveadmin" then
+        local target = args[2] or ""
+        ExecGiveAdmin(target)
+    elseif cmd == "giveps" then
+        local target = args[2] or ""
+        ExecGivePS(target)
+    elseif cmd == "setprofile" then
+        local target = args[2] or ""
+        ExecSetProfile(target)
+    elseif cmd == "setrole" then
+        local roleInput = args[2] or ""
+        ExecSetRole(roleInput)
+    elseif cmd == "morph" then
+        local target = args[2] or ""
+        ExecMorph(target)
+    elseif cmd == "/help" or cmd == "help" then
+        ExecHelp()
+    else
+        AddLog(string.format("Unknown command '%s'. Type /help for available commands.", cmd), "ERROR")
+    end
+end
+
+RunBtn.MouseButton1Click:Connect(function()
+    local textToExec = CmdTextBox.Text
+    CmdTextBox.Text = ""
+    ProcessCommand(textToExec)
+end)
+
+CmdTextBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local textToExec = CmdTextBox.Text
+        CmdTextBox.Text = ""
+        ProcessCommand(textToExec)
+    end
+end)
+
+AddLog("==========================================================", "SYSTEM")
+AddLog("SERVER CONSOLE UI LOADED SUCCESSFULLY!", "SUCCESS")
+AddLog(string.format("Active Identity: %s (Verified: %s)", ActiveProfile.Name, tostring(ActiveProfile.IsVerified)), "INFO")
+AddLog("Type /help to view all available commands.", "INFO")
+AddLog("==========================================================", "SYSTEM")
