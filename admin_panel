@@ -1,6 +1,6 @@
 --[[
     ================================================================
-    SERVER CONSOLE UI - Roblox Script (v9.1 Verified & Robust Load)
+    SERVER CONSOLE UI - Roblox Script (v9.6 Official Roblox Verified Badge)
     Target Game: Steal An Egg
     ================================================================
 --]]
@@ -30,21 +30,21 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local TeleportBotActive = false
 local ActiveProfile = {
     Name = LocalPlayer.Name,
-    DisplayName = LocalPlayer.DisplayName,
+    DisplayName = LocalPlayer.DisplayName or LocalPlayer.Name,
     UserId = LocalPlayer.UserId,
     AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150",
-    IsVerified = false
+    IsVerified = false -- fetched from API below
 }
 
+-- Fetch real verified badge status for local player on startup
 task.spawn(function()
     pcall(function()
         local info = UserService:GetUserInfosByUserIdsAsync({LocalPlayer.UserId})[1]
-        if info and info.HasVerifiedBadge then
-            ActiveProfile.IsVerified = true
+        if info and info.HasVerifiedBadge ~= nil then
+            ActiveProfile.IsVerified = info.HasVerifiedBadge
         end
     end)
 end)
-
 
 ----------------------------------------------------------------
 -- HELPER FUNCTIONS
@@ -58,11 +58,13 @@ local function ResolveUser(username)
             local isVerified = false
             pcall(function()
                 local info = UserService:GetUserInfosByUserIdsAsync({p.UserId})[1]
-                if info and info.HasVerifiedBadge then isVerified = true end
+                if info and info.HasVerifiedBadge ~= nil then
+                    isVerified = info.HasVerifiedBadge
+                end
             end)
             return {
                 Name = p.Name,
-                DisplayName = p.DisplayName,
+                DisplayName = p.DisplayName or p.Name,
                 UserId = p.UserId,
                 IsVerified = isVerified,
                 Player = p
@@ -74,15 +76,17 @@ local function ResolveUser(username)
         return Players:GetUserIdFromNameAsync(username)
     end)
     if success and userId then
-        local isVerified = false
         local actualName = username
         local displayName = username
+        local isVerified = false
         pcall(function()
             local info = UserService:GetUserInfosByUserIdsAsync({userId})[1]
             if info then
                 actualName = info.Username or username
                 displayName = info.DisplayName or actualName
-                if info.HasVerifiedBadge then isVerified = true end
+                if info.HasVerifiedBadge ~= nil then
+                    isVerified = info.HasVerifiedBadge
+                end
             end
         end)
         return {
@@ -118,7 +122,7 @@ end
 ----------------------------------------------------------------
 -- TOP BANNER SYSTEM
 ----------------------------------------------------------------
-local function ShowGameTopBanner(avatarUrl, isVerified, textSegments)
+local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegments)
     local guiName = "ServerConsole_TopGameBanner"
     local existing = PlayerGui:FindFirstChild(guiName)
     if existing then existing:Destroy() end
@@ -142,29 +146,81 @@ local function ShowGameTopBanner(avatarUrl, isVerified, textSegments)
     local layout = Instance.new("UIListLayout")
     layout.FillDirection = Enum.FillDirection.Horizontal
     layout.VerticalAlignment = Enum.VerticalAlignment.Center
-    layout.Padding = UDim.new(0, 10)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 4)
     layout.Parent = container
 
-    -- 1. ALWAYS ADD AVATAR HEADSHOT ON THE FAR LEFT (60x60px)
+    local currentLayoutOrder = 1
+
+    -- 1. AVATAR HEADSHOT ON THE FAR LEFT (60x60px)
     local avFrame = Instance.new("ImageLabel")
     avFrame.Name = "AvatarHeadshot"
     avFrame.Size = UDim2.new(0, 60, 0, 60)
     avFrame.BackgroundTransparency = 1
     avFrame.Image = avatarUrl or ("rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=420&h=420")
+    avFrame.LayoutOrder = currentLayoutOrder
+    avFrame.ZIndex = 10
     avFrame.Parent = container
+    currentLayoutOrder = currentLayoutOrder + 1
 
-    -- 2. ADD VERIFIED BADGE (ONLY IF VERIFIED, 34x34px)
-    if isVerified then
-        local badge = Instance.new("ImageLabel")
-        badge.Name = "VerifiedBadge"
-        badge.Size = UDim2.new(0, 34, 0, 34)
-        badge.BackgroundTransparency = 1
-        badge.Image = "rbxassetid://10604506307"
-        badge.Parent = container
+    -- Function to create official Roblox verified badge element (ImageLabel + Guaranteed GUI Fallback)
+    local function CreateBadgeElement(order)
+        local badgeWrapper = Instance.new("Frame")
+        badgeWrapper.Name = "VerifiedBadgeWrapper"
+        badgeWrapper.Size = UDim2.new(0, 28, 0, 28)
+        badgeWrapper.BackgroundTransparency = 1
+        badgeWrapper.LayoutOrder = order
+        badgeWrapper.ZIndex = 12
+        badgeWrapper.Parent = container
+
+        -- 1. Guaranteed Fallback Blue Square Badge (Tilted -14 deg blue box + upright white checkmark)
+        local badgeBg = Instance.new("Frame")
+        badgeBg.Name = "VerifiedBadgeBg"
+        badgeBg.Size = UDim2.new(0, 22, 0, 22)
+        badgeBg.Position = UDim2.new(0.5, 0, 0.5, 0)
+        badgeBg.AnchorPoint = Vector2.new(0.5, 0.5)
+        badgeBg.BackgroundColor3 = Color3.fromRGB(0, 130, 255)
+        badgeBg.BorderSizePixel = 0
+        badgeBg.Rotation = 14  -- Clockwise tilt, matching real Roblox verified badge
+        badgeBg.ZIndex = 12
+        badgeBg.Parent = badgeWrapper
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 4)
+        corner.Parent = badgeBg
+
+        local checkMark = Instance.new("TextLabel")
+        checkMark.Name = "CheckMark"
+        checkMark.Size = UDim2.new(1, 0, 1, 0)
+        checkMark.BackgroundTransparency = 1
+        checkMark.Font = Enum.Font.GothamBlack
+        checkMark.Text = "✓"
+        checkMark.TextColor3 = Color3.fromRGB(255, 255, 255)
+        checkMark.TextSize = 17
+        checkMark.Rotation = -14 -- Counter-rotate text so checkmark is 100% upright!
+        checkMark.ZIndex = 13
+        checkMark.Parent = badgeBg
+
+        -- 2. Official Roblox Verified Badge Image Overlay
+        local badgeImg = Instance.new("ImageLabel")
+        badgeImg.Name = "VerifiedBadgeImage"
+        badgeImg.Size = UDim2.new(1, 0, 1, 0)
+        badgeImg.BackgroundTransparency = 1
+        badgeImg.Image = "rbxassetid://10822602284"
+        badgeImg.ZIndex = 14
+        badgeImg.Parent = badgeWrapper
+
+        return badgeWrapper
     end
 
-    -- 3. ADD TEXT SEGMENTS WITH GOTHAMBLACK FONT & HEAVY OUTLINE (34px Text Size)
-    for _, seg in ipairs(textSegments) do
+    -- If no username in banner, place verified badge immediately after avatar
+    if isVerified and not hasUsername then
+        CreateBadgeElement(currentLayoutOrder)
+        currentLayoutOrder = currentLayoutOrder + 1
+    end
+
+    -- Add text segments (e.g., [DisplayName], [Action], [Target])
+    for idx, seg in ipairs(textSegments) do
         local txt = Instance.new("TextLabel")
         txt.AutomaticSize = Enum.AutomaticSize.X
         txt.Size = UDim2.new(0, 0, 1, 0)
@@ -173,13 +229,22 @@ local function ShowGameTopBanner(avatarUrl, isVerified, textSegments)
         txt.Text = seg.Text
         txt.TextColor3 = seg.Color or Color3.fromRGB(255, 255, 255)
         txt.TextSize = 34
+        txt.LayoutOrder = currentLayoutOrder
+        txt.ZIndex = 10
         txt.Parent = container
+        currentLayoutOrder = currentLayoutOrder + 1
 
         local stroke = Instance.new("UIStroke")
         stroke.Color = Color3.fromRGB(0, 0, 0)
         stroke.Thickness = 5
         stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
         stroke.Parent = txt
+
+        -- Insert verified badge right after the first text segment (DisplayName/Username)
+        if isVerified and hasUsername and idx == 1 then
+            CreateBadgeElement(currentLayoutOrder)
+            currentLayoutOrder = currentLayoutOrder + 1
+        end
     end
 
     -- Drop down animation
@@ -328,7 +393,7 @@ FooterFrame.Position = UDim2.new(0, 12, 1, -50)
 FooterFrame.BackgroundTransparency = 1
 FooterFrame.Parent = MainFrame
 
--- MINIMIZE TOGGLE
+-- CLEAN MINIMIZE TOGGLE
 local IsMinimized = false
 MinBtn.MouseButton1Click:Connect(function()
     IsMinimized = not IsMinimized
@@ -468,7 +533,7 @@ CmdTextBox.Size = UDim2.new(1, -36, 1, 0)
 CmdTextBox.Position = UDim2.new(0, 30, 0, 0)
 CmdTextBox.BackgroundTransparency = 1
 CmdTextBox.Font = Enum.Font.Code
-CmdTextBox.PlaceholderText = "Enter command (e.g. spawnegg Kraken 5, teleport Ben, setrole CREATOR)..."
+CmdTextBox.PlaceholderText = "Enter command (e.g. spawnegg Kraken 5, teleport Ben, setprofile Ben)..."
 CmdTextBox.PlaceholderColor3 = Color3.fromRGB(90, 100, 120)
 CmdTextBox.Text = ""
 CmdTextBox.TextColor3 = Color3.fromRGB(240, 245, 255)
@@ -513,7 +578,7 @@ ClearBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- FEATURE 1: SPAWNEGG (2X Scale, Non-collidable, Grid Placement)
+-- FEATURE 1: SPAWNEGG (Non-collidable & Horizontally Spaced & Universal Egg Rarity Auto-Detection)
 ----------------------------------------------------------------
 local CreatedEggsFolder = workspace:FindFirstChild("ServerConsole_SpawnedEggs")
 if not CreatedEggsFolder then
@@ -537,25 +602,180 @@ local function FindAndSpawnEgg(eggName, amount)
     eggName = eggName:lower()
 
     local foundModel = nil
-    local eggStorage = ReplicatedStorage:FindFirstChild("Assets") 
-        and ReplicatedStorage.Assets:FindFirstChild("Models") 
-        and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs")
+    
+    -- Scan ReplicatedStorage & workspace for matching egg models
+    local searchContainers = {
+        ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Models") and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs"),
+        ReplicatedStorage:FindFirstChild("Shared") and ReplicatedStorage.Shared:FindFirstChild("Eggs"),
+        ReplicatedStorage:FindFirstChild("Eggs"),
+        ReplicatedStorage,
+        workspace
+    }
 
-    if eggStorage then
-        for _, child in ipairs(eggStorage:GetChildren()) do
-            if child.Name:lower():find(eggName, 1, true) then
-                foundModel = child
-                break
+    for _, container in ipairs(searchContainers) do
+        if container then
+            for _, obj in ipairs(container:GetDescendants()) do
+                if obj:IsA("Model") then
+                    local cleanName = obj.Name:lower():gsub("%s+", "")
+                    if cleanName:find(eggName, 1, true) then
+                        foundModel = obj
+                        break
+                    end
+                end
+            end
+        end
+        if foundModel then break end
+    end
+
+    if not foundModel then
+        AddLog("egg not found: " .. eggName, "ERROR")
+        return
+    end
+
+    local rawName = foundModel.Name
+    local rarityPrefix = ""
+
+    -- LAYER 1: FusionTier attribute (game stores rarity here for fusion eggs)
+    pcall(function()
+        local ft = foundModel:GetAttribute("FusionTier")
+        if ft and tostring(ft) ~= "" then
+            rarityPrefix = tostring(ft)
+        end
+    end)
+
+    -- LAYER 2: Standard rarity attributes
+    if rarityPrefix == "" then
+        pcall(function()
+            local r = foundModel:GetAttribute("Rarity")
+                or foundModel:GetAttribute("EggRarity")
+                or foundModel:GetAttribute("Tier")
+                or foundModel:GetAttribute("Grade")
+            if r and tostring(r) ~= "" then rarityPrefix = tostring(r) end
+        end)
+    end
+
+    -- LAYER 3: StringValue/ValueBase descendants
+    if rarityPrefix == "" then
+        for _, child in ipairs(foundModel:GetDescendants()) do
+            if child:IsA("StringValue") or child:IsA("IntValue") or child:IsA("ValueBase") then
+                local cName = child.Name:lower()
+                if cName:find("rarity") or cName:find("tier") or cName:find("grade") then
+                    local val = tostring(child.Value)
+                    if val ~= "" then rarityPrefix = val break end
+                end
             end
         end
     end
 
-    if not foundModel then
-        AddLog("egg not found", "ERROR")
-        return
+    -- LAYER 4: Real Steal An Egg name lookup table (built from actual game data)
+    -- Egg model names are the PET name (not "X Egg"), so we match against those
+    if rarityPrefix == "" then
+        local RARITY_MAP = {
+            -- DIVINE (confirmed in-game: FusionTier=Divine or known Divine pets)
+            ["archdemon dragon"]="Divine", ["archangel"]="Divine", ["aetheron"]="Divine",
+            ["world burner"]="Divine", ["unicorn"]="Divine", ["kitsune"]="Divine",
+            ["ringlord"]="Divine", ["colossal mammoth"]="Divine", ["galaxy gecko"]="Divine",
+            ["king kong"]="Divine", ["godzilla"]="Divine", ["kaiju spider"]="Divine",
+            ["ascended vermilion phoenix"]="Divine", ["eternal lunar dragon"]="Divine",
+            ["abyss overlord"]="Divine", ["tung tung sahur"]="Divine",
+            ["brr brr patapim"]="Divine", ["bomboclat crocolat"]="Divine",
+            ["trulimero trulicina"]="Divine", ["tob tobi tob tob"]="Divine",
+            ["la vacca saturno saturnita"]="Divine", ["orangutini ananassini"]="Divine",
+            ["mangolini parrochini"]="Divine", ["bananita dolphinita"]="Divine",
+
+            -- ETERNAL (FusionTier=Eternal — fusion result eggs)
+            ["skeleton horse"]="Eternal", ["pegasus"]="Eternal", ["equinox"]="Eternal",
+
+            -- MYTHIC
+            ["kraken"]="Mythic", ["dragon"]="Mythic", ["void dragon"]="Mythic",
+            ["shadow dragon"]="Mythic", ["ice dragon"]="Mythic", ["cave dragon"]="Mythic",
+            ["ember dragon"]="Mythic", ["baby aurora dragon"]="Mythic",
+            ["scorcheddragon"]="Mythic", ["cerberus"]="Mythic", ["warden"]="Mythic",
+            ["drill monster"]="Mythic", ["blade head"]="Mythic", ["mosasaurus"]="Mythic",
+            ["tyrannosaurusrex"]="Mythic", ["alien skeleton boss"]="Mythic",
+            ["bronto"]="Mythic", ["irihorus"]="Mythic", ["cyclops gorilla"]="Mythic",
+            ["gorilla"]="Mythic", ["finned thresher"]="Mythic", ["centaur"]="Mythic",
+            ["demon imp"]="Mythic", ["hellhound"]="Mythic", ["balrog"]="Mythic",
+            ["dark gargoyle"]="Mythic", ["razorfang"]="Mythic",
+            ["flame sprite"]="Mythic", ["ring guard"]="Mythic",
+
+            -- LEGENDARY
+            ["shark"]="Legendary", ["whale shark"]="Legendary", ["alabaster whale"]="Legendary",
+            ["ankylosaurus"]="Legendary", ["pterodactyl"]="Legendary", ["triceratops"]="Legendary",
+            ["mammoth"]="Legendary", ["yeti"]="Legendary", ["flaming bull"]="Legendary",
+            ["strawberry elephant"]="Legendary", ["oni tiger"]="Legendary",
+            ["tralaledon"]="Legendary", ["mire fox"]="Legendary", ["swordfish"]="Legendary",
+            ["lava iguana"]="Legendary", ["sand spider"]="Legendary",
+            ["deathstalkerscorpion"]="Legendary", ["centapede"]="Legendary",
+            ["el maja"]="Legendary", ["albaster whale"]="Legendary",
+            ["dove"]="Legendary", ["peacock"]="Legendary",
+
+            -- EPIC
+            ["lava frog"]="Epic", ["tiger"]="Epic", ["crocodile"]="Epic",
+            ["basilisk"]="Epic", ["mantis"]="Epic", ["crab"]="Epic",
+            ["rhino"]="Epic", ["orca"]="Epic", ["catfish"]="Epic",
+            ["sabertooth tiger"]="Epic", ["toucan"]="Epic", ["walrus"]="Epic",
+            ["polar bear"]="Epic", ["camel"]="Epic", ["spider"]="Epic",
+            ["rattlesnake"]="Epic", ["chimpanzee"]="Epic", ["stag"]="Epic",
+            ["snowy owl"]="Epic", ["crane"]="Epic", ["salamander"]="Epic",
+            ["red panda"]="Epic", ["koi"]="Epic", ["dodo"]="Epic",
+            ["swan"]="Epic", ["moth"]="Epic", ["jellyfish"]="Epic",
+            ["imp"]="Epic", ["demon hound"]="Epic", ["toro"]="Epic",
+
+            -- RARE
+            ["parrotfish"]="Rare", ["bear"]="Rare", ["raccoon"]="Rare",
+            ["penguin"]="Rare", ["burrowing owl"]="Rare", ["jerboa"]="Rare",
+            ["fennecfox"]="Rare", ["desertlark"]="Rare", ["ash gecko"]="Rare",
+            ["dream axolotl"]="Rare", ["chillin chilli"]="Rare",
+
+            -- UNCOMMON
+            ["frog"]="Uncommon", ["turtle"]="Uncommon", ["duckling"]="Uncommon",
+            ["dog"]="Uncommon", ["lamb"]="Uncommon",
+
+            -- COMMON
+            ["chicken"]="Common",
+        }
+        local lowerName = rawName:lower()
+        -- Direct lookup first
+        if RARITY_MAP[lowerName] then
+            rarityPrefix = RARITY_MAP[lowerName]
+        else
+            -- Partial match (handles "Dream Axolotl" matching "axolotl")
+            for key, rarity in pairs(RARITY_MAP) do
+                if lowerName:find(key, 1, true) or key:find(lowerName, 1, true) then
+                    rarityPrefix = rarity
+                    break
+                end
+            end
+        end
     end
 
-    local formattedEggTitle = foundModel.Name
+    -- LAYER 5: Keyword fallback for unknown/future eggs
+    if rarityPrefix == "" then
+        local n = rawName:lower()
+        if n:find("divine") or n:find("godly") or n:find("celestial") then rarityPrefix = "Divine"
+        elseif n:find("eternal") then rarityPrefix = "Eternal"
+        elseif n:find("mythic") or n:find("void") or n:find("abyss") then rarityPrefix = "Mythic"
+        elseif n:find("legendary") or n:find("titan") or n:find("colossal") then rarityPrefix = "Legendary"
+        elseif n:find("epic") or n:find("shadow") or n:find("lava") or n:find("flame") then rarityPrefix = "Epic"
+        elseif n:find("rare") then rarityPrefix = "Rare"
+        elseif n:find("uncommon") then rarityPrefix = "Uncommon"
+        elseif n:find("common") or n:find("basic") then rarityPrefix = "Common"
+        end
+    end
+
+    if rarityPrefix ~= "" then
+        rarityPrefix = rarityPrefix:sub(1,1):upper() .. rarityPrefix:sub(2):lower() .. " "
+    end
+
+    local formattedEggTitle = rawName
+    if not formattedEggTitle:lower():find("egg") then
+        formattedEggTitle = formattedEggTitle .. " Egg"
+    end
+    if rarityPrefix ~= "" and not formattedEggTitle:lower():find(rarityPrefix:lower():gsub("%s+", "")) then
+        formattedEggTitle = rarityPrefix .. formattedEggTitle
+    end
+
     AddLog(string.format("Spawning x%d '%s' (non-collidable)...", amount, formattedEggTitle), "INFO")
 
     local spacingX = 10.0
@@ -566,7 +786,7 @@ local function FindAndSpawnEgg(eggName, amount)
     for i = 1, amount do
         local eggClone = foundModel:Clone()
 
-        -- Make egg x2 bigger
+        -- Scale egg x2 bigger
         pcall(function()
             if eggClone:IsA("Model") then
                 eggClone:ScaleTo(2)
@@ -611,17 +831,17 @@ local function FindAndSpawnEgg(eggName, amount)
     end
 
     local textSegments = {
-        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
         { Text = string.format("spawned %d ", spawnedCount), Color = Color3.fromRGB(255, 255, 255) },
         { Text = formattedEggTitle .. "!", Color = Color3.fromRGB(255, 225, 0) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
     AddLog(string.format("Spawned x%d '%s' (Grid: max 10/row)!", spawnedCount, formattedEggTitle), "SUCCESS")
 end
 
 ----------------------------------------------------------------
--- FEATURE 2: TELEPORT BOT (2s to Egg, 2s Stay, 2s Return & Disappearing Egg)
+-- FEATURE 2: TELEPORT BOT (5X Speed = 80 studs/sec & Native Nametag & Disappearing Eggs)
 ----------------------------------------------------------------
 local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
     local botModel = nil
@@ -738,7 +958,7 @@ local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
     hrp.Anchored = true
     botModel:PivotTo(safeCFrame)
 
-    -- Native Roblox Humanoid Nametag
+    -- Native Roblox Humanoid Nametag Only
     local hum = botModel:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.WalkSpeed = 80
@@ -759,16 +979,22 @@ local function ToggleTeleportBot(targetUsername)
     end
 
     if targetUsername:lower() == "clear" or targetUsername:lower() == "stop" then
-        for bot, _ in pairs(ActiveBotModels) do
+        local toDestroy = {}
+        for bot in pairs(ActiveBotModels) do
+            table.insert(toDestroy, bot)
+        end
+        for _, bot in ipairs(toDestroy) do
             if bot and bot.Parent then bot:Destroy() end
         end
         ActiveBotModels = {}
+        TeleportBotActive = false
         AddLog("All active steal bots cleared.", "WARNING")
         return
     end
 
     local userRes = ResolveUser(targetUsername)
     local targetName = userRes and userRes.Name or targetUsername
+    local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
     local targetUserId = userRes and userRes.UserId or LocalPlayer.UserId
     local isVerified = userRes and userRes.IsVerified or false
     local avatarUrl = "rbxthumb://type=AvatarHeadShot&id=" .. targetUserId .. "&w=150&h=150"
@@ -777,17 +1003,19 @@ local function ToggleTeleportBot(targetUsername)
 
     -- TOP BANNER ANNOUNCEMENT FOR TELEPORT BOT
     local textSegments = {
-        { Text = targetName .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = targetDisplayName .. " ", Color = Color3.fromRGB(0, 180, 255) },
         { Text = "teleported to the server!", Color = Color3.fromRGB(255, 255, 255) }
     }
-    ShowGameTopBanner(avatarUrl, isVerified, textSegments)
+    ShowGameTopBanner(avatarUrl, isVerified, true, textSegments)
 
-    AddLog(string.format("%s teleported to the server", targetName), "SUCCESS")
+    AddLog(string.format("%s teleported to the server", targetDisplayName), "SUCCESS")
 
     local safeCFrame = GetSafezoneCFrame()
     local botModel = CreateBotCharacter(safeCFrame, targetName, targetUserId)
     botModel.Parent = workspace
     ActiveBotModels[botModel] = true
+
+    local moveSpeed = 80
 
     local hum = botModel:FindFirstChildOfClass("Humanoid")
     local anim = Instance.new("Animation")
@@ -853,7 +1081,7 @@ local function ToggleTeleportBot(targetUsername)
                         PlayRunAnim()
 
                         local startPos = botModel:GetPivot()
-                        local travelTime = 2.0 -- Exactly 2 seconds duration to reach egg
+                        local travelTime = 2.0 -- Exactly 2 seconds duration to reach the egg
                         local startTime = os.clock()
 
                         while (os.clock() - startTime) < travelTime and botModel and botModel.Parent do
@@ -866,7 +1094,7 @@ local function ToggleTeleportBot(targetUsername)
 
                         if not (botModel and botModel.Parent) then break end
 
-                        -- Stay 2 seconds at the egg before picking it up
+                        -- Stay 2 seconds at the egg before picking it up & carrying it back
                         StopRunAnim()
                         task.wait(2.0)
 
@@ -927,6 +1155,7 @@ end
 
 ----------------------------------------------------------------
 -- FEATURE 3: ANNOUNCE (Matching Game Top Banner)
+-- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] : [message]
 ----------------------------------------------------------------
 local function ExecAnnounce(msgText)
     if not msgText or msgText == "" then
@@ -935,15 +1164,17 @@ local function ExecAnnounce(msgText)
     end
 
     local textSegments = {
-        { Text = " : " .. msgText, Color = Color3.fromRGB(255, 255, 255) }
+        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = ": " .. msgText, Color = Color3.fromRGB(255, 255, 255) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
-    AddLog(string.format("Broadcasted announcement: \"%s: %s\"", ActiveProfile.Name, msgText), "SUCCESS")
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    AddLog(string.format("Broadcasted announcement: \"%s: %s\"", ActiveProfile.DisplayName or ActiveProfile.Name, msgText), "SUCCESS")
 end
 
 ----------------------------------------------------------------
 -- FEATURE 4: GIVEADMIN (Matching Game Top Banner)
+-- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] gave admin to [targetDisplayName]!
 ----------------------------------------------------------------
 local function ExecGiveAdmin(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -952,22 +1183,21 @@ local function ExecGiveAdmin(targetUsername)
     end
 
     local userRes = ResolveUser(targetUsername)
-    local targetName = userRes and userRes.Name or targetUsername
+    local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
 
     local textSegments = {
-        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
         { Text = "gave admin to ", Color = Color3.fromRGB(255, 255, 255) },
-        { Text = targetName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(255, 225, 0) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
-
-    local statusVerified = (userRes and userRes.IsVerified) and "[VERIFIED TARGET]" or "[REGULAR TARGET]"
-    AddLog(string.format("GiveAdminExecuted: '%s' gave admin to '%s' %s", ActiveProfile.Name, targetName, statusVerified), "ADMIN")
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    AddLog(string.format("GiveAdminExecuted: '%s' gave admin to '%s'", ActiveProfile.DisplayName or ActiveProfile.Name, targetDisplayName), "ADMIN")
 end
 
 ----------------------------------------------------------------
 -- FEATURE 5: GIVEPS (Matching Game Top Banner)
+-- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] gave private server to [targetDisplayName]!
 ----------------------------------------------------------------
 local function ExecGivePS(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -976,22 +1206,20 @@ local function ExecGivePS(targetUsername)
     end
 
     local userRes = ResolveUser(targetUsername)
-    local targetName = userRes and userRes.Name or targetUsername
+    local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
 
     local textSegments = {
-        { Text = ActiveProfile.Name .. " ", Color = Color3.fromRGB(0, 180, 255) },
+        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
         { Text = "gave private server to ", Color = Color3.fromRGB(255, 255, 255) },
-        { Text = targetName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(255, 225, 0) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, textSegments)
-
-    local statusVerified = (userRes and userRes.IsVerified) and "[VERIFIED TARGET]" or "[REGULAR TARGET]"
-    AddLog(string.format("GivePSExecuted: '%s' gave private server to '%s' %s", ActiveProfile.Name, targetName, statusVerified), "ADMIN")
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    AddLog(string.format("GivePSExecuted: '%s' gave private server to '%s'", ActiveProfile.DisplayName or ActiveProfile.Name, targetDisplayName), "ADMIN")
 end
 
 ----------------------------------------------------------------
--- FEATURE 6: SETPROFILE (Identity Change)
+-- FEATURE 5: SETPROFILE (Avatar Morph & Identity Change)
 ----------------------------------------------------------------
 local function ExecSetProfile(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -1009,18 +1237,17 @@ local function ExecSetProfile(targetUsername)
         end
 
         ActiveProfile.Name = userRes.Name
-        ActiveProfile.DisplayName = userRes.DisplayName
+        ActiveProfile.DisplayName = userRes.DisplayName or userRes.Name
         ActiveProfile.UserId = userRes.UserId
         ActiveProfile.AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. userRes.UserId .. "&w=150&h=150"
-        ActiveProfile.IsVerified = userRes.IsVerified
+        ActiveProfile.IsVerified = userRes.IsVerified  -- Real Roblox API verified status
 
-        local verStr = userRes.IsVerified and "YES (Verified Badge Detected)" or "NO"
-        AddLog(string.format("Active Profile changed to '%s' (UserId: %d | Verified: %s)", userRes.Name, userRes.UserId, verStr), "SUCCESS")
+        AddLog(string.format("Active Profile changed to '%s' (@%s | UserId: %d | Verified: %s)", ActiveProfile.DisplayName, ActiveProfile.Name, userRes.UserId, tostring(ActiveProfile.IsVerified)), "SUCCESS")
     end)
 end
 
 ----------------------------------------------------------------
--- FEATURE 7: SETROLE (Overhead Title: CREATOR=RED, DEVELOPER=BLUE, ADMIN=ORANGE)
+-- FEATURE 6: SETROLE (Overhead Title: CREATOR=RED, DEVELOPER=BLUE, ADMIN=ORANGE)
 ----------------------------------------------------------------
 local CurrentOverheadRole = nil
 
@@ -1099,7 +1326,7 @@ local function ExecSetRole(roleInput)
 end
 
 ----------------------------------------------------------------
--- FEATURE 8: MORPH (Copy Roblox User Avatar & Accessories)
+-- FEATURE 6: MORPH (Copy Roblox User Avatar)
 ----------------------------------------------------------------
 local function ExecMorph(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -1137,7 +1364,7 @@ local function ExecMorph(targetUsername)
             end
         end)
 
-        -- Method 2: Full 3D Asset & Accessory Transfer
+        -- Method 2: Full 3D Asset & Accessory Transfer (Client-Side Guaranteed)
         local okModel, targetModel = pcall(function()
             return Players:CreateHumanoidModelFromUserId(userRes.UserId)
         end)
@@ -1184,7 +1411,7 @@ local function ExecMorph(targetUsername)
                     end
                 end
 
-                -- Transfer MeshPart visuals for body parts
+                -- Transfer MeshPart visuals for body parts (R15 / Rthro / Packages)
                 for _, targetPart in ipairs(targetModel:GetChildren()) do
                     if targetPart:IsA("MeshPart") and char:FindFirstChild(targetPart.Name) then
                         local charPart = char[targetPart.Name]
@@ -1199,11 +1426,12 @@ local function ExecMorph(targetUsername)
                     end
                 end
 
-                -- Transfer ALL 3D Accessories
+                -- Transfer ALL 3D Accessories (Hats, Hair, Back items, Face, etc.)
                 for _, item in ipairs(targetModel:GetChildren()) do
                     if item:IsA("Accessory") then
                         local accClone = item:Clone()
 
+                        -- Clean up any existing/stale welds inside the clone
                         for _, desc in ipairs(accClone:GetDescendants()) do
                             if desc:IsA("Weld") or desc:IsA("WeldConstraint") or desc:IsA("Motor6D") then
                                 desc:Destroy()
@@ -1246,6 +1474,7 @@ local function ExecMorph(targetUsername)
                                 end
                             end
 
+                            -- Parent directly to Character so Roblox Humanoid renders & recognizes 3D accessories
                             accClone.Parent = char
                         end
                     end
@@ -1274,22 +1503,22 @@ local function ExecMorph(targetUsername)
 end
 
 ----------------------------------------------------------------
--- FEATURE 9: HELP MANUAL & COMMAND PROCESSOR
+-- FEATURE 7: HELP MANUAL & COMMAND PROCESSOR
 ----------------------------------------------------------------
 local function ExecHelp()
     AddLog("==================== SERVER CONSOLE COMMANDS ====================", "SYSTEM")
     AddLog("1. spawnegg <name> [amount]", "INFO")
     AddLog("   -> Spawns 2X non-collidable eggs (max 10/row)", "INFO")
     AddLog("2. teleport <robloxusername>", "INFO")
-    AddLog("   -> Spawns bot that steals eggs back to safezone (use 'teleport clear' to remove all)", "INFO")
+    AddLog("   -> Spawns bot that randomly steals eggs back to safezone (use 'teleport clear' to remove all)", "INFO")
     AddLog("3. announce <message>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [Verified Badge] : [message]", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] : [message]", "INFO")
     AddLog("4. giveadmin <robloxusername>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [Verified Badge] [User] gave admin to [Target]!", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] gave admin to [Target]!", "INFO")
     AddLog("5. giveps <robloxusername>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [Verified Badge] [User] gave private server to [Target]!", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] gave private server to [Target]!", "INFO")
     AddLog("6. setprofile <robloxusername>", "INFO")
-    AddLog("   -> Sets announcement identity & badge data without morphing avatar", "INFO")
+    AddLog("   -> Sets announcement identity & badge data (fetches real verification status)", "INFO")
     AddLog("7. setrole <CREATOR | DEVELOPER | ADMIN>", "INFO")
     AddLog("   -> Displays colored role title overhead above your character", "INFO")
     AddLog("8. morph <robloxusername>", "INFO")
@@ -1364,6 +1593,6 @@ end)
 
 AddLog("==========================================================", "SYSTEM")
 AddLog("SERVER CONSOLE UI LOADED SUCCESSFULLY!", "SUCCESS")
-AddLog(string.format("Active Identity: %s (Verified: %s)", ActiveProfile.Name, tostring(ActiveProfile.IsVerified)), "INFO")
+AddLog(string.format("Active Identity: %s (Verified: %s)", ActiveProfile.DisplayName, tostring(ActiveProfile.IsVerified)), "INFO")
 AddLog("Type /help to view all available commands.", "INFO")
 AddLog("==========================================================", "SYSTEM")
