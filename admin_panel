@@ -1,6 +1,6 @@
 --[[
     ================================================================
-    SERVER CONSOLE UI - Roblox Script (v9.6 Official Roblox Verified Badge)
+    SERVER CONSOLE UI - Roblox Script (v11.0 Pure Divine & Limited Mix)
     Target Game: Steal An Egg
     ================================================================
 --]]
@@ -33,15 +33,15 @@ local ActiveProfile = {
     DisplayName = LocalPlayer.DisplayName or LocalPlayer.Name,
     UserId = LocalPlayer.UserId,
     AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150",
-    IsVerified = false -- fetched from API below
+    IsVerified = true -- Enabled by default so verified badge shows immediately
 }
 
--- Fetch real verified badge status for local player on startup
+-- Check real Roblox profile verification in background
 task.spawn(function()
     pcall(function()
         local info = UserService:GetUserInfosByUserIdsAsync({LocalPlayer.UserId})[1]
         if info and info.HasVerifiedBadge ~= nil then
-            ActiveProfile.IsVerified = info.HasVerifiedBadge
+            -- Profile verified status known
         end
     end)
 end)
@@ -59,7 +59,7 @@ local function ResolveUser(username)
             pcall(function()
                 local info = UserService:GetUserInfosByUserIdsAsync({p.UserId})[1]
                 if info and info.HasVerifiedBadge ~= nil then
-                    isVerified = info.HasVerifiedBadge
+                    isVerified = (info.HasVerifiedBadge == true)
                 end
             end)
             return {
@@ -85,7 +85,7 @@ local function ResolveUser(username)
                 actualName = info.Username or username
                 displayName = info.DisplayName or actualName
                 if info.HasVerifiedBadge ~= nil then
-                    isVerified = info.HasVerifiedBadge
+                    isVerified = (info.HasVerifiedBadge == true)
                 end
             end
         end)
@@ -119,10 +119,47 @@ local function GetSafezoneCFrame()
     return CFrame.new(0, 50, 0)
 end
 
+local function GetGroundHeight(pos, ignoreList, defaultOffset)
+    defaultOffset = defaultOffset or 0
+    local rayOrigin = Vector3.new(pos.X, pos.Y + 18, pos.Z)
+    local rayParams = RaycastParams.new()
+    local fullIgnore = {}
+    if ignoreList then
+        for _, inst in ipairs(ignoreList) do
+            if inst then table.insert(fullIgnore, inst) end
+        end
+    end
+    local spawnedEggs = workspace:FindFirstChild("ServerConsole_SpawnedEggs")
+    if spawnedEggs then
+        table.insert(fullIgnore, spawnedEggs)
+    end
+    local placedRenders = workspace:FindFirstChild("PlacedEggRenders")
+    if placedRenders then
+        table.insert(fullIgnore, placedRenders)
+    end
+    rayParams.FilterDescendantsInstances = fullIgnore
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local hit = workspace:Raycast(rayOrigin, Vector3.new(0, -60, 0), rayParams)
+    if hit then
+        -- Secondary check: if hit part belongs to an egg model in Workspace, punch through down to ground
+        local hitModel = hit.Instance:FindFirstAncestorOfClass("Model")
+        if hitModel and (hitModel.Name:lower():find("egg") or (spawnedEggs and hitModel.Parent == spawnedEggs)) then
+            local nextOrigin = Vector3.new(pos.X, hit.Position.Y - 0.2, pos.Z)
+            local secondaryHit = workspace:Raycast(nextOrigin, Vector3.new(0, -50, 0), rayParams)
+            if secondaryHit then
+                return secondaryHit.Position.Y + defaultOffset
+            end
+        end
+        return hit.Position.Y + defaultOffset
+    end
+    return pos.Y + defaultOffset
+end
+
 ----------------------------------------------------------------
--- TOP BANNER SYSTEM
+-- TOP BANNER SYSTEM (Authentic Official Roblox Verified Badge)
 ----------------------------------------------------------------
-local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegments)
+local function ShowGameTopBanner(avatarUrl, displayName, isVerified, textSegments)
     local guiName = "ServerConsole_TopGameBanner"
     local existing = PlayerGui:FindFirstChild(guiName)
     if existing then existing:Destroy() end
@@ -133,7 +170,6 @@ local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegment
     sg.DisplayOrder = 2000
     sg.Parent = PlayerGui
 
-    -- Main Horizontal Container Frame
     local container = Instance.new("Frame")
     container.Name = "TopBannerContainer"
     container.AutomaticSize = Enum.AutomaticSize.X
@@ -147,80 +183,73 @@ local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegment
     layout.FillDirection = Enum.FillDirection.Horizontal
     layout.VerticalAlignment = Enum.VerticalAlignment.Center
     layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 4)
+    layout.Padding = UDim.new(0, 6)
     layout.Parent = container
 
     local currentLayoutOrder = 1
 
-    -- 1. AVATAR HEADSHOT ON THE FAR LEFT (60x60px)
-    local avFrame = Instance.new("ImageLabel")
-    avFrame.Name = "AvatarHeadshot"
-    avFrame.Size = UDim2.new(0, 60, 0, 60)
-    avFrame.BackgroundTransparency = 1
-    avFrame.Image = avatarUrl or ("rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=420&h=420")
-    avFrame.LayoutOrder = currentLayoutOrder
-    avFrame.ZIndex = 10
-    avFrame.Parent = container
-    currentLayoutOrder = currentLayoutOrder + 1
-
-    -- Function to create official Roblox verified badge element (ImageLabel + Guaranteed GUI Fallback)
-    local function CreateBadgeElement(order)
-        local badgeWrapper = Instance.new("Frame")
-        badgeWrapper.Name = "VerifiedBadgeWrapper"
-        badgeWrapper.Size = UDim2.new(0, 28, 0, 28)
-        badgeWrapper.BackgroundTransparency = 1
-        badgeWrapper.LayoutOrder = order
-        badgeWrapper.ZIndex = 12
-        badgeWrapper.Parent = container
-
-        -- 1. Guaranteed Fallback Blue Square Badge (Tilted -14 deg blue box + upright white checkmark)
-        local badgeBg = Instance.new("Frame")
-        badgeBg.Name = "VerifiedBadgeBg"
-        badgeBg.Size = UDim2.new(0, 22, 0, 22)
-        badgeBg.Position = UDim2.new(0.5, 0, 0.5, 0)
-        badgeBg.AnchorPoint = Vector2.new(0.5, 0.5)
-        badgeBg.BackgroundColor3 = Color3.fromRGB(0, 130, 255)
-        badgeBg.BorderSizePixel = 0
-        badgeBg.Rotation = 14  -- Clockwise tilt, matching real Roblox verified badge
-        badgeBg.ZIndex = 12
-        badgeBg.Parent = badgeWrapper
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 4)
-        corner.Parent = badgeBg
-
-        local checkMark = Instance.new("TextLabel")
-        checkMark.Name = "CheckMark"
-        checkMark.Size = UDim2.new(1, 0, 1, 0)
-        checkMark.BackgroundTransparency = 1
-        checkMark.Font = Enum.Font.GothamBlack
-        checkMark.Text = "✓"
-        checkMark.TextColor3 = Color3.fromRGB(255, 255, 255)
-        checkMark.TextSize = 17
-        checkMark.Rotation = -14 -- Counter-rotate text so checkmark is 100% upright!
-        checkMark.ZIndex = 13
-        checkMark.Parent = badgeBg
-
-        -- 2. Official Roblox Verified Badge Image Overlay
-        local badgeImg = Instance.new("ImageLabel")
-        badgeImg.Name = "VerifiedBadgeImage"
-        badgeImg.Size = UDim2.new(1, 0, 1, 0)
-        badgeImg.BackgroundTransparency = 1
-        badgeImg.Image = "rbxassetid://10822602284"
-        badgeImg.ZIndex = 14
-        badgeImg.Parent = badgeWrapper
-
-        return badgeWrapper
-    end
-
-    -- If no username in banner, place verified badge immediately after avatar
-    if isVerified and not hasUsername then
-        CreateBadgeElement(currentLayoutOrder)
+    -- 1. Avatar Headshot
+    if avatarUrl and avatarUrl ~= "" then
+        local avFrame = Instance.new("ImageLabel")
+        avFrame.Name = "AvatarHeadshot"
+        avFrame.Size = UDim2.new(0, 60, 0, 60)
+        avFrame.BackgroundTransparency = 1
+        avFrame.Image = avatarUrl
+        avFrame.LayoutOrder = currentLayoutOrder
+        avFrame.ZIndex = 10
+        avFrame.Parent = container
         currentLayoutOrder = currentLayoutOrder + 1
     end
 
-    -- Add text segments (e.g., [DisplayName], [Action], [Target])
-    for idx, seg in ipairs(textSegments) do
+    -- 2. Display Name (Pure name, no colon)
+    if displayName and displayName ~= "" then
+        local nameTxt = Instance.new("TextLabel")
+        nameTxt.Name = "DisplayNameLabel"
+        nameTxt.AutomaticSize = Enum.AutomaticSize.X
+        nameTxt.Size = UDim2.new(0, 0, 1, 0)
+        nameTxt.BackgroundTransparency = 1
+        nameTxt.Font = Enum.Font.GothamBlack
+        nameTxt.Text = displayName
+        nameTxt.TextColor3 = Color3.fromRGB(0, 180, 255)
+        nameTxt.TextSize = 34
+        nameTxt.LayoutOrder = currentLayoutOrder
+        nameTxt.ZIndex = 10
+        nameTxt.Parent = container
+        currentLayoutOrder = currentLayoutOrder + 1
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(0, 0, 0)
+        stroke.Thickness = 5
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        stroke.Parent = nameTxt
+    end
+
+    -- 3. Verified Badge: Placed DIRECTLY IN THE SIDE AFTER DISPLAY NAME
+    -- ONLY shown if isVerified == true (controlled dynamically by setprofile / setverify)
+    if isVerified == true then
+        local badgeTxt = Instance.new("TextLabel")
+        badgeTxt.Name = "VerifiedBadge"
+        badgeTxt.AutomaticSize = Enum.AutomaticSize.XY
+        badgeTxt.Size = UDim2.new(0, 0, 1, 0)
+        badgeTxt.BackgroundTransparency = 1
+        badgeTxt.Font = Enum.Font.BuilderSansExtraBold
+        badgeTxt.Text = utf8.char(0xE000)
+        badgeTxt.TextColor3 = Color3.fromRGB(0, 162, 255)
+        badgeTxt.TextSize = 34
+        badgeTxt.LayoutOrder = currentLayoutOrder
+        badgeTxt.ZIndex = 16
+        badgeTxt.Parent = container
+        currentLayoutOrder = currentLayoutOrder + 1
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(0, 0, 0)
+        stroke.Thickness = 3
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        stroke.Parent = badgeTxt
+    end
+
+    -- 4. Text Segments (Action / Message / Colon)
+    for _, seg in ipairs(textSegments or {}) do
         local txt = Instance.new("TextLabel")
         txt.AutomaticSize = Enum.AutomaticSize.X
         txt.Size = UDim2.new(0, 0, 1, 0)
@@ -239,21 +268,13 @@ local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegment
         stroke.Thickness = 5
         stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
         stroke.Parent = txt
-
-        -- Insert verified badge right after the first text segment (DisplayName/Username)
-        if isVerified and hasUsername and idx == 1 then
-            CreateBadgeElement(currentLayoutOrder)
-            currentLayoutOrder = currentLayoutOrder + 1
-        end
     end
 
-    -- Drop down animation
     local dropIn = TweenService:Create(container, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Position = UDim2.new(0.5, 0, 0, 15)
     })
     dropIn:Play()
 
-    -- Sound chime
     task.spawn(function()
         local s = Instance.new("Sound")
         s.SoundId = "rbxassetid://6026986407"
@@ -263,7 +284,6 @@ local function ShowGameTopBanner(avatarUrl, isVerified, hasUsername, textSegment
         s.Ended:Connect(function() s:Destroy() end)
     end)
 
-    -- Auto dismiss after 5s
     task.delay(5, function()
         if container and container.Parent then
             local dropOut = TweenService:Create(container, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -393,7 +413,6 @@ FooterFrame.Position = UDim2.new(0, 12, 1, -50)
 FooterFrame.BackgroundTransparency = 1
 FooterFrame.Parent = MainFrame
 
--- CLEAN MINIMIZE TOGGLE
 local IsMinimized = false
 MinBtn.MouseButton1Click:Connect(function()
     IsMinimized = not IsMinimized
@@ -533,7 +552,7 @@ CmdTextBox.Size = UDim2.new(1, -36, 1, 0)
 CmdTextBox.Position = UDim2.new(0, 30, 0, 0)
 CmdTextBox.BackgroundTransparency = 1
 CmdTextBox.Font = Enum.Font.Code
-CmdTextBox.PlaceholderText = "Enter command (e.g. spawnegg Kraken 5, teleport Ben, setprofile Ben)..."
+CmdTextBox.PlaceholderText = "Enter command (e.g. spawnegg Kraken 5, mixegg 25, teleport Ben)..."
 CmdTextBox.PlaceholderColor3 = Color3.fromRGB(90, 100, 120)
 CmdTextBox.Text = ""
 CmdTextBox.TextColor3 = Color3.fromRGB(240, 245, 255)
@@ -543,6 +562,7 @@ CmdTextBox.ClearTextOnFocus = false
 CmdTextBox.Parent = InputBg
 
 local RunBtn = Instance.new("TextButton")
+RunBtn.Name = "RunBtn"
 RunBtn.Size = UDim2.new(0, 100, 1, 0)
 RunBtn.Position = UDim2.new(1, -172, 0, 0)
 RunBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -557,6 +577,7 @@ RunCorner.CornerRadius = UDim.new(0, 8)
 RunCorner.Parent = RunBtn
 
 local ClearBtn = Instance.new("TextButton")
+ClearBtn.Name = "ClearBtn"
 ClearBtn.Size = UDim2.new(0, 64, 1, 0)
 ClearBtn.Position = UDim2.new(1, -64, 0, 0)
 ClearBtn.BackgroundColor3 = Color3.fromRGB(35, 40, 55)
@@ -578,7 +599,226 @@ ClearBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- FEATURE 1: SPAWNEGG (Non-collidable & Horizontally Spaced & Universal Egg Rarity Auto-Detection)
+-- GAME EGG SCANNER & REGISTRY (Guaranteed Pure Divine & Limited)
+----------------------------------------------------------------
+local function IsPetModel(obj)
+    if not obj or not obj:IsA("Model") then return false end
+    -- Check for humanoid parts / pet rig identifiers
+    if obj:FindFirstChild("HumanoidRootPart") 
+        or obj:FindFirstChild("CENTER") 
+        or obj:FindFirstChild("Humanoid") 
+        or obj:FindFirstChild("AnimationController")
+        or obj:FindFirstChildWhichIsA("Accessory") then
+        return true
+    end
+    -- Check parent folder: AssetModels and Assets.Models contain pet character rigs
+    local parent = obj.Parent
+    if parent then
+        if parent.Name == "AssetModels" then return true end
+        if parent.Name == "Models" and parent.Parent and parent.Parent.Name == "Assets" then return true end
+    end
+    return false
+end
+
+local ScannedEggsCache = {
+    All = {},
+    Divine = {},
+    Limited = {},
+    Lookup = {}
+}
+
+-- Specific user-requested Divine eggs: aetheron, world burner, archdemon, archangel, kitsune, unicorn, nightflame
+local TARGET_DIVINE_SPECS = {
+    { canonical = "Aetheron", direct = "Aetheron", aliases = {"aetheron", "aetheronegg", "aetheron egg"} },
+    { canonical = "World Burner", direct = "World Burner", aliases = {"world burner", "worldburner", "worldburneregg", "world burner egg"} },
+    { canonical = "Archdemon", direct = "Archdemon Dragon", aliases = {"archdemon", "archdemon dragon", "archdemondragon", "demonic egg", "demonicegg"} },
+    { canonical = "Archangel", direct = "ArchAngel", aliases = {"archangel", "archangelegg", "archangel egg"} },
+    { canonical = "Kitsune", direct = "Kitsune", aliases = {"kitsune", "kitsuneegg", "kitsune egg"} },
+    { canonical = "Unicorn", direct = "Unicorn", aliases = {"unicorn", "unicornegg", "unicorn egg"} },
+    { canonical = "Nightflame", direct = "Godzilla", aliases = {"nightflame", "night flame", "godzilla", "nightflameegg", "night flame egg"} },
+}
+
+-- Specific user-requested Limited eggs: brainrot egg, luminous egg, monster egg, experiment #001, shattered rift egg, rift born egg, nibbles #013, riftbeast egg
+local TARGET_LIMITED_SPECS = {
+    { canonical = "Brainrot Egg", direct = "Tung Tung Sahur", aliases = {"brainrot egg", "brainrotegg", "brainrot", "brain rot", "brain rot egg", "tung tung sahur", "tungtungsahur"} },
+    { canonical = "Luminous Egg", direct = "Depths Egg", aliases = {"luminous egg", "luminousegg", "luminous", "depths egg", "depths reroll egg", "depthsegg", "depthsrerollegg"} },
+    { canonical = "Monster Egg", direct = "Monster Egg", aliases = {"monster egg", "monsteregg", "monster", "monstrous egg", "monstrousegg"} },
+    { canonical = "Experiment #001", direct = "LimitedExperimentEgg", aliases = {"experiment #001", "experiment001", "experiment 001", "limitedexperimentegg", "experiment", "experimentegg", "limitedexperiment"} },
+    { canonical = "Shattered Rift Egg", direct = "Shattered Rift Egg", aliases = {"shattered rift egg", "shattered rift", "shatteredriftegg", "shatteredrift"} },
+    { canonical = "Rift Born Egg", direct = "Riftborn Egg", aliases = {"rift born egg", "riftborn egg", "rift born", "riftborn", "riftbornegg", "rift eye", "rifteye"} },
+    { canonical = "Nibbles #013", direct = "Nibbles #013", aliases = {"nibbles #013", "nibbles013", "nibbles", "nibbles13", "nibbles egg"} },
+    { canonical = "Riftbeast Egg", direct = "Riftbeasts Egg", aliases = {"riftbeast egg", "riftbeastegg", "rift beast egg", "riftbeasts egg", "riftbeast", "riftbeasts", "riftwing"} },
+}
+
+local function FindTargetEgg(spec)
+    local eggsFolder = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Models") and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs")
+    -- Direct match in Eggs folder first (guaranteed genuine egg model, never a pet)
+    if eggsFolder and spec.direct then
+        local directObj = eggsFolder:FindFirstChild(spec.direct)
+        if directObj and directObj:IsA("Model") and not IsPetModel(directObj) then
+            return directObj
+        end
+    end
+
+    for _, alias in ipairs(spec.aliases) do
+        local clean = alias:lower():gsub("%s+", ""):gsub("[#_]", "")
+        if ScannedEggsCache.Lookup[clean] and not IsPetModel(ScannedEggsCache.Lookup[clean]) then
+            return ScannedEggsCache.Lookup[clean]
+        end
+    end
+    for _, alias in ipairs(spec.aliases) do
+        local clean = alias:lower():gsub("%s+", ""):gsub("[#_]", "")
+        for key, model in pairs(ScannedEggsCache.Lookup) do
+            if (key == clean or key:find(clean, 1, true) or clean:find(key, 1, true)) and not IsPetModel(model) then
+                return model
+            end
+        end
+    end
+
+    -- Search strictly EGG containers (NEVER AssetModels or Models)
+    local searchContainers = {
+        eggsFolder,
+        workspace:FindFirstChild("PlacedEggRenders"),
+        workspace:FindFirstChild("Eggs")
+    }
+    for _, container in ipairs(searchContainers) do
+        if container then
+            for _, obj in ipairs(container:GetChildren()) do
+                if obj:IsA("Model") and not IsPetModel(obj) then
+                    local objName = obj.Name:lower():gsub("%s+", ""):gsub("[#_]", "")
+                    for _, alias in ipairs(spec.aliases) do
+                        local clean = alias:lower():gsub("%s+", ""):gsub("[#_]", "")
+                        if objName == clean or objName:find(clean, 1, true) or clean:find(objName, 1, true) then
+                            ScannedEggsCache.Lookup[clean] = obj
+                            return obj
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function ScanAllGameEggs()
+    local allList = {}
+    local divineList = {}
+    local limitedList = {}
+    local lookup = {}
+    local seen = {}
+
+    local eggsFolder = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Models") and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs")
+    local searchContainers = {
+        eggsFolder,
+        workspace:FindFirstChild("PlacedEggRenders"),
+        workspace:FindFirstChild("Eggs")
+    }
+
+    for _, container in ipairs(searchContainers) do
+        if container then
+            for _, obj in ipairs(container:GetDescendants()) do
+                if obj:IsA("Model") and not seen[obj] and not IsPetModel(obj) then
+                    local nameLow = obj.Name:lower()
+                    local cleanName = nameLow:gsub("%s+", ""):gsub("[#_]", "")
+
+                    local isEgg = nameLow:find("egg") 
+                        or (obj.Parent and obj.Parent.Name:lower():find("egg"))
+                        or obj:FindFirstChild("Hitbox") ~= nil
+
+                    if not isEgg then
+                        for _, spec in ipairs(TARGET_DIVINE_SPECS) do
+                            for _, al in ipairs(spec.aliases) do
+                                if cleanName == al:lower():gsub("%s+", ""):gsub("[#_]", "") then
+                                    isEgg = true
+                                    break
+                                end
+                            end
+                            if isEgg then break end
+                        end
+                    end
+
+                    if not isEgg then
+                        for _, spec in ipairs(TARGET_LIMITED_SPECS) do
+                            for _, al in ipairs(spec.aliases) do
+                                if cleanName == al:lower():gsub("%s+", ""):gsub("[#_]", "") then
+                                    isEgg = true
+                                    break
+                                end
+                            end
+                            if isEgg then break end
+                        end
+                    end
+
+                    if isEgg then
+                        seen[obj] = true
+                        table.insert(allList, obj)
+                        lookup[cleanName] = obj
+
+                        local fusionTier = tostring(obj:GetAttribute("FusionTier") or ""):lower()
+                        local rarityAttr = tostring(obj:GetAttribute("Rarity") or obj:GetAttribute("EggRarity") or ""):lower()
+
+                        -- STRICT BLACKLIST: Absolutely NO Secret or Eternal eggs in Divine or Limited
+                        local isSecretOrEternal = fusionTier:find("eternal")
+                            or rarityAttr:find("eternal")
+                            or rarityAttr:find("secret")
+                            or cleanName:find("secret")
+                            or cleanName:find("skeletonhorse")
+                            or cleanName:find("pegasus")
+                            or cleanName:find("equinox")
+                            or cleanName:find("worldeater")
+
+                        if not isSecretOrEternal then
+                            local isTargetDivine = false
+                            for _, spec in ipairs(TARGET_DIVINE_SPECS) do
+                                for _, al in ipairs(spec.aliases) do
+                                    if cleanName == al:lower():gsub("%s+", ""):gsub("[#_]", "") then
+                                        isTargetDivine = true
+                                        break
+                                    end
+                                end
+                                if isTargetDivine then break end
+                            end
+
+                            local isTargetLimited = false
+                            for _, spec in ipairs(TARGET_LIMITED_SPECS) do
+                                for _, al in ipairs(spec.aliases) do
+                                    if cleanName == al:lower():gsub("%s+", ""):gsub("[#_]", "") then
+                                        isTargetLimited = true
+                                        break
+                                    end
+                                end
+                                if isTargetLimited then break end
+                            end
+
+                            if isTargetDivine or fusionTier:find("divine") or rarityAttr:find("divine") then
+                                table.insert(divineList, obj)
+                            elseif isTargetLimited or cleanName:find("limited") or cleanName:find("rift") or cleanName:find("monster") then
+                                table.insert(limitedList, obj)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    ScannedEggsCache.All = allList
+    ScannedEggsCache.Divine = divineList
+    ScannedEggsCache.Limited = limitedList
+    ScannedEggsCache.Lookup = lookup
+
+    return ScannedEggsCache
+end
+
+-- Run initial game scan in background
+task.spawn(function()
+    task.wait(1.5)
+    local scan = ScanAllGameEggs()
+    AddLog(string.format("Scanned eggs: %d Total | %d Pure Divine | %d Limited (Secret/Eternal Excluded)", #scan.All, #scan.Divine, #scan.Limited), "SYSTEM")
+end)
+
+----------------------------------------------------------------
+-- EGG SPAWNER (Giant 5X Size, Ground-Snapped, Pop-In Animation & Authentic VFX)
 ----------------------------------------------------------------
 local CreatedEggsFolder = workspace:FindFirstChild("ServerConsole_SpawnedEggs")
 if not CreatedEggsFolder then
@@ -587,10 +827,248 @@ if not CreatedEggsFolder then
     CreatedEggsFolder.Parent = workspace
 end
 
+local function GetModelOrPartBounds(obj)
+    if not obj then return CFrame.new(), Vector3.new(4, 4, 4) end
+    if obj:IsA("Model") then
+        local cf, sz = obj:GetBoundingBox()
+        return cf, sz
+    elseif obj:IsA("BasePart") then
+        return obj.CFrame, obj.Size
+    end
+    return CFrame.new(), Vector3.new(4, 4, 4)
+end
+
+local function DetectEggRarity(eggNameOrModel)
+    local rawName = ""
+    if typeof(eggNameOrModel) == "Instance" then
+        rawName = eggNameOrModel.Name
+    elseif type(eggNameOrModel) == "string" then
+        rawName = eggNameOrModel
+    end
+    local clean = rawName:lower():gsub("%s+", ""):gsub("[#_]", "")
+
+    -- 1. Divine targets check
+    for _, spec in ipairs(TARGET_DIVINE_SPECS) do
+        for _, al in ipairs(spec.aliases) do
+            local cleanAl = al:lower():gsub("%s+", ""):gsub("[#_]", "")
+            if clean == cleanAl or clean:find(cleanAl, 1, true) or cleanAl:find(clean, 1, true) then
+                return "Divine"
+            end
+        end
+    end
+    if clean:find("divine") or clean:find("kitsune") or clean:find("aetheron") or clean:find("worldburner") or clean:find("archdemon") or clean:find("archangel") or clean:find("unicorn") or clean:find("nightflame") then
+        return "Divine"
+    end
+
+    -- 2. Eternal targets check
+    local eternalKeywords = {
+        "eternal", "balrog", "worldeater", "eternallunar", "onitiger",
+        "terrasnapper", "krakenoid", "voiddragon", "skeletondragon", "elmaja"
+    }
+    for _, kw in ipairs(eternalKeywords) do
+        if clean:find(kw, 1, true) then
+            return "Eternal"
+        end
+    end
+
+    -- 3. Limited targets check
+    for _, spec in ipairs(TARGET_LIMITED_SPECS) do
+        for _, al in ipairs(spec.aliases) do
+            local cleanAl = al:lower():gsub("%s+", ""):gsub("[#_]", "")
+            if clean == cleanAl or clean:find(cleanAl, 1, true) or cleanAl:find(clean, 1, true) then
+                return "Limited"
+            end
+        end
+    end
+    if clean:find("limited") or clean:find("rift") or clean:find("brainrot") or clean:find("luminous") or clean:find("experiment") or clean:find("nibbles") then
+        return "Limited"
+    end
+
+    -- 4. Check ReplicatedStorage.Data.Assets if available in game
+    local success, Assets = pcall(function()
+        return require(ReplicatedStorage.Data.Assets)
+    end)
+    if success and Assets and Assets.Directory then
+        for assetName, data in pairs(Assets.Directory) do
+            local assetClean = assetName:lower():gsub("%s+", ""):gsub("[#_]", "")
+            if clean == assetClean or clean:find(assetClean, 1, true) or assetClean:find(clean, 1, true) then
+                if data.Rarity then
+                    local rDisp = tostring(data.Rarity.DisplayName or ""):lower()
+                    local rId = tostring(data.Rarity._id or ""):lower()
+                    if rDisp == "divine" or rId == "divine" then return "Divine" end
+                    if rDisp == "eternal" or rId == "eternal" then return "Eternal" end
+                    if rDisp == "limited" or rId == "limited" then return "Limited" end
+                end
+            end
+        end
+    end
+
+    return "Divine"
+end
+
+local function AttachGameEggEffects(eggClone, sourceModel, rarityType, eggScale)
+    local targetPart = eggClone.PrimaryPart or eggClone:FindFirstChildWhichIsA("BasePart")
+    if not targetPart then
+        for _, p in ipairs(eggClone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                targetPart = p
+                break
+            end
+        end
+    end
+    if not targetPart then return end
+
+    local scaleMultiplier = eggScale or 5.0
+
+    local isUnicorn = sourceModel.Name:lower():find("unicorn") ~= nil
+    if isUnicorn then
+        -- Preserve and enable Unicorn's authentic 12-layer rainbow sparkles and PointLight
+        for _, fx in ipairs(eggClone:GetDescendants()) do
+            if fx:IsA("ParticleEmitter") or fx:IsA("PointLight") or fx:IsA("SurfaceLight") or fx:IsA("SpotLight") or fx:IsA("Beam") or fx:IsA("Trail") then
+                fx.Enabled = true
+            end
+        end
+        return
+    end
+
+    -- Enable built-in custom model particles (Riftbeasts, Riftborn, Abyss Overlord, Drill Monster, Godzilla, etc.)
+    for _, fx in ipairs(eggClone:GetDescendants()) do
+        if fx:IsA("ParticleEmitter") or fx:IsA("PointLight") or fx:IsA("Beam") or fx:IsA("Trail") then
+            fx.Enabled = true
+        end
+    end
+
+    -- Attach authentic in-game EggRarityVFX from ReplicatedStorage
+    local vfxFolder = ReplicatedStorage:FindFirstChild("Assets")
+        and ReplicatedStorage.Assets:FindFirstChild("Particles")
+        and ReplicatedStorage.Assets.Particles:FindFirstChild("EggRarityVFX")
+
+    if vfxFolder then
+        local isSecret = (rarityType == "Secret") or (sourceModel.Name:lower():find("jellyfish") ~= nil)
+
+        local cloneAtt = nil
+
+        if isSecret then
+            -- RarityNumber8: Rainbow Glow, Rainbow Flares & Rainbow Stars
+            local tierFolder = vfxFolder:FindFirstChild("RarityNumber8")
+            if tierFolder then
+                local att = tierFolder:FindFirstChild("Attachment")
+                if att then
+                    cloneAtt = att:Clone()
+                    cloneAtt.Name = "EggRarityFX"
+                    cloneAtt.Parent = targetPart
+                end
+            end
+        else
+            -- RarityNumber9+: Radiant Gold Glow, Rotating God Rays, Vortex Intake, Flares & Golden Stars
+            local tierFolder = vfxFolder:FindFirstChild("RarityNumber9+")
+            if tierFolder then
+                local fxAtt = tierFolder:FindFirstChild("FX")
+                if fxAtt then
+                    cloneAtt = fxAtt:Clone()
+                    cloneAtt.Name = "EggRarityFX"
+                    cloneAtt.Parent = targetPart
+
+                    for _, child in ipairs(tierFolder:GetChildren()) do
+                        if child:IsA("ParticleEmitter") then
+                            local peClone = child:Clone()
+                            peClone.Parent = cloneAtt
+                        end
+                    end
+                end
+            end
+        end
+
+        if cloneAtt then
+            -- Center the attachment directly at the geometric center of the egg
+            local cf, bSize = GetModelOrPartBounds(eggClone)
+            if cf and targetPart then
+                cloneAtt.Position = targetPart.CFrame:PointToObjectSpace(cf.Position)
+            end
+
+            -- Scale all particles proportionally so they fit and envelop the entire egg model!
+            for _, emitter in ipairs(cloneAtt:GetChildren()) do
+                if emitter:IsA("ParticleEmitter") then
+                    emitter.Enabled = true
+                    pcall(function()
+                        local newKeypoints = {}
+                        for _, kp in ipairs(emitter.Size.Keypoints) do
+                            table.insert(newKeypoints, NumberSequenceKeypoint.new(
+                                kp.Time,
+                                kp.Value * scaleMultiplier,
+                                (kp.Envelope or 0) * scaleMultiplier
+                            ))
+                        end
+                        emitter.Size = NumberSequence.new(newKeypoints)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function SpawnSingleEggInstance(sourceModel, targetPosition, eggScale, rarityType)
+    eggScale = eggScale or 5.0
+    local eggClone = sourceModel:Clone()
+
+    pcall(function()
+        if eggClone:IsA("Model") then
+            eggClone:ScaleTo(eggScale)
+        elseif eggClone:IsA("BasePart") then
+            eggClone.Size = eggClone.Size * eggScale
+        end
+    end)
+
+    for _, p in ipairs(eggClone:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.CanCollide = false
+            p.CanTouch = false
+            p.CanQuery = false
+            p.Anchored = true
+        end
+    end
+
+    -- Attach authentic in-game egg effects scaled to fit the egg model
+    AttachGameEggEffects(eggClone, sourceModel, rarityType, eggScale)
+
+    local cf, size = GetModelOrPartBounds(eggClone)
+    local halfHeight = (size.Y > 0 and size.Y or 12) / 2
+    local groundY = GetGroundHeight(targetPosition, {LocalPlayer.Character, CreatedEggsFolder}, 0)
+    local finalEggCFrame = CFrame.new(targetPosition.X, groundY + halfHeight + 0.15, targetPosition.Z) * CFrame.Angles(0, math.rad(math.random(0, 360)), 0)
+
+    if eggClone:IsA("Model") then
+        if not eggClone.PrimaryPart then
+            for _, p in ipairs(eggClone:GetDescendants()) do
+                if p:IsA("BasePart") then eggClone.PrimaryPart = p break end
+            end
+        end
+        if eggClone.PrimaryPart then
+            eggClone:PivotTo(finalEggCFrame)
+        end
+    elseif eggClone:IsA("BasePart") then
+        eggClone.CFrame = finalEggCFrame
+    end
+
+    eggClone.Parent = CreatedEggsFolder
+
+    pcall(function()
+        local snd = Instance.new("Sound")
+        snd.SoundId = "rbxassetid://6026986407"
+        snd.Volume = 0.5
+        snd.Parent = SoundService
+        snd:Play()
+        snd.Ended:Connect(function() snd:Destroy() end)
+    end)
+
+    return eggClone
+end
+
+----------------------------------------------------------------
+-- FEATURE 1: SPAWNEGG (Universal Egg Spawner)
+----------------------------------------------------------------
 local function FindAndSpawnEgg(eggName, amount)
     amount = tonumber(amount) or 1
     if amount < 1 then amount = 1 end
-    if amount > 100 then amount = 100 end
 
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
@@ -602,29 +1080,27 @@ local function FindAndSpawnEgg(eggName, amount)
     eggName = eggName:lower()
 
     local foundModel = nil
-    
-    -- Scan ReplicatedStorage & workspace for matching egg models
-    local searchContainers = {
-        ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Models") and ReplicatedStorage.Assets.Models:FindFirstChild("Eggs"),
-        ReplicatedStorage:FindFirstChild("Shared") and ReplicatedStorage.Shared:FindFirstChild("Eggs"),
-        ReplicatedStorage:FindFirstChild("Eggs"),
-        ReplicatedStorage,
-        workspace
-    }
+    local cleanSearch = eggName:gsub("%s+", "")
 
-    for _, container in ipairs(searchContainers) do
-        if container then
-            for _, obj in ipairs(container:GetDescendants()) do
-                if obj:IsA("Model") then
-                    local cleanName = obj.Name:lower():gsub("%s+", "")
-                    if cleanName:find(eggName, 1, true) then
-                        foundModel = obj
-                        break
-                    end
-                end
+    if ScannedEggsCache.Lookup[cleanSearch] then
+        foundModel = ScannedEggsCache.Lookup[cleanSearch]
+    else
+        for key, model in pairs(ScannedEggsCache.Lookup) do
+            if key:find(cleanSearch, 1, true) or cleanSearch:find(key, 1, true) then
+                foundModel = model
+                break
             end
         end
-        if foundModel then break end
+    end
+
+    if not foundModel then
+        ScanAllGameEggs()
+        for key, model in pairs(ScannedEggsCache.Lookup) do
+            if key:find(cleanSearch, 1, true) or cleanSearch:find(key, 1, true) then
+                foundModel = model
+                break
+            end
+        end
     end
 
     if not foundModel then
@@ -635,15 +1111,11 @@ local function FindAndSpawnEgg(eggName, amount)
     local rawName = foundModel.Name
     local rarityPrefix = ""
 
-    -- LAYER 1: FusionTier attribute (game stores rarity here for fusion eggs)
     pcall(function()
         local ft = foundModel:GetAttribute("FusionTier")
-        if ft and tostring(ft) ~= "" then
-            rarityPrefix = tostring(ft)
-        end
+        if ft and tostring(ft) ~= "" then rarityPrefix = tostring(ft) end
     end)
 
-    -- LAYER 2: Standard rarity attributes
     if rarityPrefix == "" then
         pcall(function()
             local r = foundModel:GetAttribute("Rarity")
@@ -654,24 +1126,8 @@ local function FindAndSpawnEgg(eggName, amount)
         end)
     end
 
-    -- LAYER 3: StringValue/ValueBase descendants
-    if rarityPrefix == "" then
-        for _, child in ipairs(foundModel:GetDescendants()) do
-            if child:IsA("StringValue") or child:IsA("IntValue") or child:IsA("ValueBase") then
-                local cName = child.Name:lower()
-                if cName:find("rarity") or cName:find("tier") or cName:find("grade") then
-                    local val = tostring(child.Value)
-                    if val ~= "" then rarityPrefix = val break end
-                end
-            end
-        end
-    end
-
-    -- LAYER 4: Real Steal An Egg name lookup table (built from actual game data)
-    -- Egg model names are the PET name (not "X Egg"), so we match against those
     if rarityPrefix == "" then
         local RARITY_MAP = {
-            -- DIVINE (confirmed in-game: FusionTier=Divine or known Divine pets)
             ["archdemon dragon"]="Divine", ["archangel"]="Divine", ["aetheron"]="Divine",
             ["world burner"]="Divine", ["unicorn"]="Divine", ["kitsune"]="Divine",
             ["ringlord"]="Divine", ["colossal mammoth"]="Divine", ["galaxy gecko"]="Divine",
@@ -682,11 +1138,7 @@ local function FindAndSpawnEgg(eggName, amount)
             ["trulimero trulicina"]="Divine", ["tob tobi tob tob"]="Divine",
             ["la vacca saturno saturnita"]="Divine", ["orangutini ananassini"]="Divine",
             ["mangolini parrochini"]="Divine", ["bananita dolphinita"]="Divine",
-
-            -- ETERNAL (FusionTier=Eternal — fusion result eggs)
             ["skeleton horse"]="Eternal", ["pegasus"]="Eternal", ["equinox"]="Eternal",
-
-            -- MYTHIC
             ["kraken"]="Mythic", ["dragon"]="Mythic", ["void dragon"]="Mythic",
             ["shadow dragon"]="Mythic", ["ice dragon"]="Mythic", ["cave dragon"]="Mythic",
             ["ember dragon"]="Mythic", ["baby aurora dragon"]="Mythic",
@@ -698,8 +1150,6 @@ local function FindAndSpawnEgg(eggName, amount)
             ["demon imp"]="Mythic", ["hellhound"]="Mythic", ["balrog"]="Mythic",
             ["dark gargoyle"]="Mythic", ["razorfang"]="Mythic",
             ["flame sprite"]="Mythic", ["ring guard"]="Mythic",
-
-            -- LEGENDARY
             ["shark"]="Legendary", ["whale shark"]="Legendary", ["alabaster whale"]="Legendary",
             ["ankylosaurus"]="Legendary", ["pterodactyl"]="Legendary", ["triceratops"]="Legendary",
             ["mammoth"]="Legendary", ["yeti"]="Legendary", ["flaming bull"]="Legendary",
@@ -709,8 +1159,6 @@ local function FindAndSpawnEgg(eggName, amount)
             ["deathstalkerscorpion"]="Legendary", ["centapede"]="Legendary",
             ["el maja"]="Legendary", ["albaster whale"]="Legendary",
             ["dove"]="Legendary", ["peacock"]="Legendary",
-
-            -- EPIC
             ["lava frog"]="Epic", ["tiger"]="Epic", ["crocodile"]="Epic",
             ["basilisk"]="Epic", ["mantis"]="Epic", ["crab"]="Epic",
             ["rhino"]="Epic", ["orca"]="Epic", ["catfish"]="Epic",
@@ -721,46 +1169,24 @@ local function FindAndSpawnEgg(eggName, amount)
             ["red panda"]="Epic", ["koi"]="Epic", ["dodo"]="Epic",
             ["swan"]="Epic", ["moth"]="Epic", ["jellyfish"]="Epic",
             ["imp"]="Epic", ["demon hound"]="Epic", ["toro"]="Epic",
-
-            -- RARE
             ["parrotfish"]="Rare", ["bear"]="Rare", ["raccoon"]="Rare",
             ["penguin"]="Rare", ["burrowing owl"]="Rare", ["jerboa"]="Rare",
             ["fennecfox"]="Rare", ["desertlark"]="Rare", ["ash gecko"]="Rare",
             ["dream axolotl"]="Rare", ["chillin chilli"]="Rare",
-
-            -- UNCOMMON
             ["frog"]="Uncommon", ["turtle"]="Uncommon", ["duckling"]="Uncommon",
             ["dog"]="Uncommon", ["lamb"]="Uncommon",
-
-            -- COMMON
-            ["chicken"]="Common",
+            ["chicken"]="Common"
         }
         local lowerName = rawName:lower()
-        -- Direct lookup first
         if RARITY_MAP[lowerName] then
             rarityPrefix = RARITY_MAP[lowerName]
         else
-            -- Partial match (handles "Dream Axolotl" matching "axolotl")
             for key, rarity in pairs(RARITY_MAP) do
                 if lowerName:find(key, 1, true) or key:find(lowerName, 1, true) then
                     rarityPrefix = rarity
                     break
                 end
             end
-        end
-    end
-
-    -- LAYER 5: Keyword fallback for unknown/future eggs
-    if rarityPrefix == "" then
-        local n = rawName:lower()
-        if n:find("divine") or n:find("godly") or n:find("celestial") then rarityPrefix = "Divine"
-        elseif n:find("eternal") then rarityPrefix = "Eternal"
-        elseif n:find("mythic") or n:find("void") or n:find("abyss") then rarityPrefix = "Mythic"
-        elseif n:find("legendary") or n:find("titan") or n:find("colossal") then rarityPrefix = "Legendary"
-        elseif n:find("epic") or n:find("shadow") or n:find("lava") or n:find("flame") then rarityPrefix = "Epic"
-        elseif n:find("rare") then rarityPrefix = "Rare"
-        elseif n:find("uncommon") then rarityPrefix = "Uncommon"
-        elseif n:find("common") or n:find("basic") then rarityPrefix = "Common"
         end
     end
 
@@ -776,73 +1202,270 @@ local function FindAndSpawnEgg(eggName, amount)
         formattedEggTitle = rarityPrefix .. formattedEggTitle
     end
 
-    AddLog(string.format("Spawning x%d '%s' (non-collidable)...", amount, formattedEggTitle), "INFO")
+    AddLog(string.format("Spawning x%d '%s' (Giant 5X Size)...", amount, formattedEggTitle), "INFO")
 
-    local spacingX = 10.0
-    local spacingZ = 10.0
-    local maxPerRow = 10
+    local spacingX = 18.0
+    local spacingZ = 18.0
+    local maxPerRow = 12
     local spawnedCount = 0
 
     for i = 1, amount do
-        local eggClone = foundModel:Clone()
-
-        -- Scale egg x2 bigger
-        pcall(function()
-            if eggClone:IsA("Model") then
-                eggClone:ScaleTo(2)
-            elseif eggClone:IsA("BasePart") then
-                eggClone.Size = eggClone.Size * 2
-            end
-        end)
-
-        for _, p in ipairs(eggClone:GetDescendants()) do
-            if p:IsA("BasePart") then
-                p.CanCollide = false
-                p.Anchored = true
-            end
-        end
-
-        -- Grid placement math: max 10 per row
         local rowIndex = math.floor((i - 1) / maxPerRow)
         local colIndex = (i - 1) % maxPerRow
         local itemsInThisRow = math.min(maxPerRow, amount - rowIndex * maxPerRow)
 
         local startX = -((itemsInThisRow - 1) * spacingX) / 2
         local xOffset = startX + colIndex * spacingX
-        local zOffset = -10 - (rowIndex * spacingZ)
+        local zOffset = -12 - (rowIndex * spacingZ)
 
-        local eggCFrame = hrp.CFrame * CFrame.new(xOffset, 1.0, zOffset)
-
-        if eggClone:IsA("Model") then
-            if not eggClone.PrimaryPart then
-                for _, p in ipairs(eggClone:GetDescendants()) do
-                    if p:IsA("BasePart") then eggClone.PrimaryPart = p break end
-                end
-            end
-            if eggClone.PrimaryPart then
-                eggClone:PivotTo(eggCFrame)
-            end
-        elseif eggClone:IsA("BasePart") then
-            eggClone.CFrame = eggCFrame
-        end
-
-        eggClone.Parent = CreatedEggsFolder
+        local targetPos = (hrp.CFrame * CFrame.new(xOffset, 0, zOffset)).Position
+        local detectedRarity = DetectEggRarity(formattedEggTitle)
+        SpawnSingleEggInstance(foundModel, targetPos, 5.0, detectedRarity)
         spawnedCount = spawnedCount + 1
+        task.wait(0.03)
     end
 
     local textSegments = {
-        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
-        { Text = string.format("spawned %d ", spawnedCount), Color = Color3.fromRGB(255, 255, 255) },
+        { Text = string.format(" spawned %d ", spawnedCount), Color = Color3.fromRGB(255, 255, 255) },
         { Text = formattedEggTitle .. "!", Color = Color3.fromRGB(255, 225, 0) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
-    AddLog(string.format("Spawned x%d '%s' (Grid: max 10/row)!", spawnedCount, formattedEggTitle), "SUCCESS")
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, (ActiveProfile.DisplayName or ActiveProfile.Name), ActiveProfile.IsVerified, textSegments)
+    AddLog(string.format("Spawned x%d '%s'!", spawnedCount, formattedEggTitle), "SUCCESS")
 end
 
 ----------------------------------------------------------------
--- FEATURE 2: TELEPORT BOT (5X Speed = 80 studs/sec & Native Nametag & Disappearing Eggs)
+-- FEATURE 2: SPAWNMIXEGG (Target Divine & Limited Only - No Max Cap)
 ----------------------------------------------------------------
+local function SpawnMixEgg(targetAmount)
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        AddLog("Character root part not found!", "ERROR")
+        return
+    end
+
+    local hrp = character.HumanoidRootPart
+    local playerPos = hrp.Position
+    ScanAllGameEggs()
+
+    local mixPool = {}
+    local poolSeen = {}
+
+    local function addToPool(model)
+        if model and not poolSeen[model] and not IsPetModel(model) then
+            local mName = model.Name:lower()
+            local fTier = tostring(model:GetAttribute("FusionTier") or ""):lower()
+            local rAttr = tostring(model:GetAttribute("Rarity") or ""):lower()
+
+            local isSecretOrEternal = fTier:find("eternal")
+                or rAttr:find("eternal")
+                or rAttr:find("secret")
+                or mName:find("secret")
+                or mName:find("skeleton horse")
+                or mName:find("pegasus")
+                or mName:find("equinox")
+                or mName:find("world eater")
+
+            if not isSecretOrEternal then
+                poolSeen[model] = true
+                table.insert(mixPool, model)
+            end
+        end
+    end
+
+    -- 1. Explicitly locate and add all requested Divine eggs:
+    for _, spec in ipairs(TARGET_DIVINE_SPECS) do
+        local m = FindTargetEgg(spec)
+        if m then addToPool(m) end
+    end
+
+    -- 2. Explicitly locate and add all requested Limited eggs:
+    for _, spec in ipairs(TARGET_LIMITED_SPECS) do
+        local m = FindTargetEgg(spec)
+        if m then addToPool(m) end
+    end
+
+    -- 3. If any couldn't be loaded, fill in with any scanned Divine and Limited eggs
+    for _, egg in ipairs(ScannedEggsCache.Divine) do addToPool(egg) end
+    for _, egg in ipairs(ScannedEggsCache.Limited) do addToPool(egg) end
+
+    if #mixPool == 0 then
+        ScanAllGameEggs()
+        for _, egg in ipairs(ScannedEggsCache.All) do addToPool(egg) end
+    end
+
+    if #mixPool == 0 then
+        AddLog("No egg models could be loaded from game assets!", "ERROR")
+        return
+    end
+
+    -- Detect which area / biome the player is standing in (e.g. Snow, Forest, Desert, Lake, Volcano, Cosmic, etc.)
+    local guardAreas = workspace:FindFirstChild("World")
+        and workspace.World:FindFirstChild("Areas")
+        and workspace.World.Areas:FindFirstChild("GuardAreas")
+
+    local standingArea = nil
+    local standingBounds = nil
+
+    if guardAreas then
+        for _, area in ipairs(guardAreas:GetChildren()) do
+            local b = area:FindFirstChild("Bounds")
+            if b and b:IsA("BasePart") then
+                local rel = b.CFrame:PointToObjectSpace(playerPos)
+                local halfX = b.Size.X / 2 + 15
+                local halfZ = b.Size.Z / 2 + 15
+                if math.abs(rel.X) <= halfX and math.abs(rel.Z) <= halfZ then
+                    standingArea = area
+                    standingBounds = b
+                    break
+                end
+            end
+        end
+    end
+
+    local spawnPoints = {}
+    local areaDisplayName = "Current Area"
+    local spacingX = 9.8
+    local spacingZ = 9.8
+
+    if standingArea and standingBounds then
+        areaDisplayName = standingArea.Name
+        local bSize = standingBounds.Size
+        local bCF = standingBounds.CFrame
+
+        local minX = -bSize.X / 2 + 5.0
+        local maxX = bSize.X / 2 - 5.0
+        local minZ = -bSize.Z / 2 + 5.0
+        local maxZ = bSize.Z / 2 - 5.0
+
+        for x = minX, maxX, spacingX do
+            for z = minZ, maxZ, spacingZ do
+                local pt = bCF * Vector3.new(x, 0, z)
+                table.insert(spawnPoints, pt)
+            end
+        end
+
+        -- Sort spawnPoints so eggs closest to the player spawn first
+        table.sort(spawnPoints, function(a, b)
+            return (a - playerPos).Magnitude < (b - playerPos).Magnitude
+        end)
+    else
+        -- If standing outside GuardAreas (e.g. safezone / spawn), densely pack a large 150-stud area around the player
+        local radiusMax = 150
+        for r = 6, radiusMax, spacingX do
+            local countOnRing = math.max(6, math.floor((2 * math.pi * r) / spacingX))
+            for k = 1, countOnRing do
+                local angle = (k / countOnRing) * (math.pi * 2)
+                local pt = playerPos + Vector3.new(math.cos(angle) * r, 0, math.sin(angle) * r)
+                table.insert(spawnPoints, pt)
+            end
+        end
+    end
+
+    local totalAvailableSlots = #spawnPoints
+    local spawnLimit = totalAvailableSlots
+
+    if targetAmount and tonumber(targetAmount) and tonumber(targetAmount) > 0 then
+        spawnLimit = math.min(tonumber(targetAmount), totalAvailableSlots)
+    end
+
+    AddLog(string.format("Completely filling '%s' with %d Divine & Limited mixed eggs (wall-to-wall, no space left)...", areaDisplayName, spawnLimit), "INFO")
+
+    local spawnedCount = 0
+
+    for i = 1, spawnLimit do
+        local chosenEggModel = mixPool[((i - 1) % #mixPool) + 1]
+        local pt = spawnPoints[i]
+        if chosenEggModel and pt then
+            local chosenRarity = DetectEggRarity(chosenEggModel.Name)
+            SpawnSingleEggInstance(chosenEggModel, pt, 5.0, chosenRarity)
+            spawnedCount = spawnedCount + 1
+
+            if i % 8 == 0 then
+                task.wait()
+            end
+        end
+    end
+
+    local textSegments = {
+        { Text = string.format(" filled %s with %d ", areaDisplayName, spawnedCount), Color = Color3.fromRGB(255, 255, 255) },
+        { Text = "Divine & Limited Mixed Eggs!", Color = Color3.fromRGB(255, 215, 0) }
+    }
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, (ActiveProfile.DisplayName or ActiveProfile.Name), ActiveProfile.IsVerified, textSegments)
+    AddLog(string.format("Completely filled '%s' with x%d Pure Divine & Limited Mixed Eggs! (No space left!)", areaDisplayName, spawnedCount), "SUCCESS")
+end
+
+----------------------------------------------------------------
+-- FEATURE 3: TELEPORT BOT (2X Speed, Ground-Snapped, Real Motor6D Walk & 5s Steal)
+----------------------------------------------------------------
+local TRAIL_PALETTES = {
+    { Name = "Divine Gold", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 230, 80)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 140, 0))
+    })},
+    { Name = "Cosmic Purple", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(190, 70, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(75, 0, 160))
+    })},
+    { Name = "Electric Cyan", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 120, 255))
+    })},
+    { Name = "Crimson Fire", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 50)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 0))
+    })},
+    { Name = "Emerald Glow", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 255, 120)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 180, 80))
+    })},
+    { Name = "Sakura Pink", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 140, 220)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 160))
+    })},
+    { Name = "Rainbow Neon", Colors = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 100)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 200)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 220, 0))
+    })}
+}
+
+local function AttachBotTrail(botModel)
+    local attachPart = botModel:FindFirstChild("UpperTorso") or botModel:FindFirstChild("Torso") or botModel:FindFirstChild("HumanoidRootPart")
+    if not attachPart then return nil end
+
+    local att0 = Instance.new("Attachment")
+    att0.Name = "TrailAtt0"
+    att0.Position = Vector3.new(0, 0.9, 0)
+    att0.Parent = attachPart
+
+    local att1 = Instance.new("Attachment")
+    att1.Name = "TrailAtt1"
+    att1.Position = Vector3.new(0, -0.9, 0)
+    att1.Parent = attachPart
+
+    local palette = TRAIL_PALETTES[math.random(1, #TRAIL_PALETTES)]
+
+    local trail = Instance.new("Trail")
+    trail.Name = "BotSpeedTrail"
+    trail.Attachment0 = att0
+    trail.Attachment1 = att1
+    trail.Color = palette.Colors
+    trail.Lifetime = 0.45
+    trail.MinLength = 0.1
+    trail.FaceCamera = true
+    trail.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.15),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    trail.LightEmission = 0.85
+    trail.LightInfluence = 0
+    trail.Enabled = false
+    trail.Parent = botModel
+
+    return trail
+end
+
 local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
     local botModel = nil
 
@@ -915,13 +1538,23 @@ local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
         leftLeg.CFrame = hrp.CFrame * CFrame.new(-0.5, -2, 0)
         rightLeg.CFrame = hrp.CFrame * CFrame.new(0.5, -2, 0)
 
-        local bodyParts = { head, torso, leftArm, rightArm, leftLeg, rightLeg }
-        for _, part in ipairs(bodyParts) do
-            local weld = Instance.new("WeldConstraint")
-            weld.Part0 = hrp
-            weld.Part1 = part
-            weld.Parent = hrp
+        local function makeMotor(name, p0, p1, c0, c1)
+            local m = Instance.new("Motor6D")
+            m.Name = name
+            m.Part0 = p0
+            m.Part1 = p1
+            m.C0 = c0
+            m.C1 = c1
+            m.Parent = p0
+            return m
         end
+
+        makeMotor("RootJoint", hrp, torso, CFrame.new(0, 0, 0), CFrame.new(0, 0, 0))
+        makeMotor("Neck", torso, head, CFrame.new(0, 1.5, 0), CFrame.new(0, 0, 0))
+        makeMotor("Left Shoulder", torso, leftArm, CFrame.new(-1.5, 0.5, 0), CFrame.new(0, 0.5, 0))
+        makeMotor("Right Shoulder", torso, rightArm, CFrame.new(1.5, 0.5, 0), CFrame.new(0, 0.5, 0))
+        makeMotor("Left Hip", torso, leftLeg, CFrame.new(-0.5, -1, 0), CFrame.new(0, 1, 0))
+        makeMotor("Right Hip", torso, rightLeg, CFrame.new(0.5, -1, 0), CFrame.new(0, 1, 0))
 
         local hum = Instance.new("Humanoid")
         hum.Parent = botModel
@@ -952,16 +1585,17 @@ local function CreateBotCharacter(safeCFrame, targetName, targetUserId)
     for _, p in ipairs(botModel:GetDescendants()) do
         if p:IsA("BasePart") then
             p.CanCollide = false
+            p.CanTouch = false
+            p.CanQuery = false
         end
     end
 
     hrp.Anchored = true
     botModel:PivotTo(safeCFrame)
 
-    -- Native Roblox Humanoid Nametag Only
     local hum = botModel:FindFirstChildOfClass("Humanoid")
     if hum then
-        hum.WalkSpeed = 80
+        hum.WalkSpeed = 60
         hum.DisplayName = targetName
         hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
         hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
@@ -1001,53 +1635,73 @@ local function ToggleTeleportBot(targetUsername)
 
     TeleportBotActive = true
 
-    -- TOP BANNER ANNOUNCEMENT FOR TELEPORT BOT
     local textSegments = {
-        { Text = targetDisplayName .. " ", Color = Color3.fromRGB(0, 180, 255) },
-        { Text = "teleported to the server!", Color = Color3.fromRGB(255, 255, 255) }
+        { Text = " teleported to the server!", Color = Color3.fromRGB(255, 255, 255) }
     }
-    ShowGameTopBanner(avatarUrl, isVerified, true, textSegments)
-
-    AddLog(string.format("%s teleported to the server", targetDisplayName), "SUCCESS")
+    ShowGameTopBanner(avatarUrl, targetDisplayName, isVerified, textSegments)
+    AddLog(string.format("%s teleported to the server (2X Speed & Animated Stride)", targetDisplayName), "SUCCESS")
 
     local safeCFrame = GetSafezoneCFrame()
     local botModel = CreateBotCharacter(safeCFrame, targetName, targetUserId)
     botModel.Parent = workspace
     ActiveBotModels[botModel] = true
 
-    local moveSpeed = 80
+    local botTrail = AttachBotTrail(botModel)
 
-    local hum = botModel:FindFirstChildOfClass("Humanoid")
-    local anim = Instance.new("Animation")
-    if hum and hum.RigType == Enum.HumanoidRigType.R15 then
-        anim.AnimationId = "rbxassetid://913376044"
-    else
-        anim.AnimationId = "rbxassetid://180436334"
-    end
+    local leftHip = botModel:FindFirstChild("Left Hip", true) or botModel:FindFirstChild("LeftHip", true)
+    local rightHip = botModel:FindFirstChild("Right Hip", true) or botModel:FindFirstChild("RightHip", true)
+    local leftShoulder = botModel:FindFirstChild("Left Shoulder", true) or botModel:FindFirstChild("LeftShoulder", true)
+    local rightShoulder = botModel:FindFirstChild("Right Shoulder", true) or botModel:FindFirstChild("RightShoulder", true)
 
-    local animator = hum and (hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum))
-    local runTrack = nil
-    if animator then
-        pcall(function()
-            runTrack = animator:LoadAnimation(anim)
-            runTrack.Looped = true
-        end)
-    end
+    local isRunning = false
+    local isCarryingEgg = false
+    local strideAngle = 0
 
-    local function PlayRunAnim()
-        if runTrack and not runTrack.IsPlaying then
-            pcall(function() runTrack:Play() end)
+    task.spawn(function()
+        while botModel and botModel.Parent do
+            if isRunning then
+                strideAngle = strideAngle + 0.42
+                local legSwing = math.sin(strideAngle) * 0.8
+                local armSwing = -math.sin(strideAngle) * 0.7
+
+                if leftHip then leftHip.Transform = CFrame.Angles(legSwing, 0, 0) end
+                if rightHip then rightHip.Transform = CFrame.Angles(-legSwing, 0, 0) end
+                if isCarryingEgg then
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(math.rad(80), math.rad(20), 0) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(math.rad(80), -math.rad(20), 0) end
+                else
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(armSwing, 0, 0) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(-armSwing, 0, 0) end
+                end
+            else
+                if leftHip then leftHip.Transform = CFrame.new() end
+                if rightHip then rightHip.Transform = CFrame.new() end
+                if isCarryingEgg then
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(math.rad(80), math.rad(20), 0) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(math.rad(80), -math.rad(20), 0) end
+                else
+                    if leftShoulder then leftShoulder.Transform = CFrame.new() end
+                    if rightShoulder then rightShoulder.Transform = CFrame.new() end
+                end
+            end
+            task.wait(0.016)
         end
+    end)
+
+    local function StartMoving()
+        isRunning = true
+        if botTrail then botTrail.Enabled = true end
     end
 
-    local function StopRunAnim()
-        if runTrack and runTrack.IsPlaying then
-            pcall(function() runTrack:Stop() end)
-        end
+    local function StopMoving()
+        isRunning = false
+        if botTrail then botTrail.Enabled = false end
     end
 
     task.spawn(function()
         local stolenCount = 0
+        local moveSpeed = 60
+
         while botModel and botModel.Parent do
             local targetEggs = {}
 
@@ -1068,7 +1722,6 @@ local function ToggleTeleportBot(targetUsername)
             end
 
             if #targetEggs > 0 then
-                -- Shuffle targetEggs table (Random Steal Order)
                 for idx = #targetEggs, 2, -1 do
                     local r = math.random(idx)
                     targetEggs[idx], targetEggs[r] = targetEggs[r], targetEggs[idx]
@@ -1078,33 +1731,62 @@ local function ToggleTeleportBot(targetUsername)
                     if not (botModel and botModel.Parent) then break end
                     local eggPos = egg:IsA("Model") and (egg.PrimaryPart and egg.PrimaryPart.CFrame or egg:GetPivot()) or (egg:IsA("BasePart") and egg.CFrame)
                     if eggPos then
-                        PlayRunAnim()
+                        local eggSize = Vector3.new(6, 12, 6)
+                        pcall(function()
+                            local _, s = GetModelOrPartBounds(egg)
+                            if s and s.Y > 0 then eggSize = s end
+                        end)
 
-                        local startPos = botModel:GetPivot()
-                        local travelTime = 2.0 -- Exactly 2 seconds duration to reach the egg
+                        local eggRadius = math.max(eggSize.X, eggSize.Z) / 2
+                        local eggHalfHeight = (eggSize.Y > 0 and eggSize.Y or 12) / 2
+
+                        local standDir = (botModel:GetPivot().Position - eggPos.Position).Unit
+                        if standDir.Magnitude < 0.1 then standDir = Vector3.new(0, 0, 1) end
+                        local targetStandPos = eggPos.Position + Vector3.new(standDir.X, 0, standDir.Z) * math.max(4.5, eggRadius + 2.0)
+
+                        local startPivot = botModel:GetPivot()
+                        local distToEgg = (Vector3.new(startPivot.Position.X, 0, startPivot.Position.Z) - Vector3.new(targetStandPos.X, 0, targetStandPos.Z)).Magnitude
+                        local travelTime = math.max(0.4, distToEgg / moveSpeed)
                         local startTime = os.clock()
+
+                        StartMoving()
 
                         while (os.clock() - startTime) < travelTime and botModel and botModel.Parent do
                             local alpha = math.min(1, (os.clock() - startTime) / travelTime)
-                            local curPos = startPos.Position:Lerp(eggPos.Position, alpha)
-                            local lookCFrame = CFrame.lookAt(curPos, Vector3.new(eggPos.Position.X, curPos.Y, eggPos.Position.Z))
-                            botModel:PivotTo(lookCFrame)
+                            local rawX = startPivot.Position.X + (targetStandPos.X - startPivot.Position.X) * alpha
+                            local rawZ = startPivot.Position.Z + (targetStandPos.Z - startPivot.Position.Z) * alpha
+                            local groundY = GetGroundHeight(Vector3.new(rawX, startPivot.Position.Y, rawZ), {botModel, CreatedEggsFolder}, 3.0)
+
+                            local nextAlpha = math.min(1, alpha + 0.02)
+                            local lookX = startPivot.Position.X + (targetStandPos.X - startPivot.Position.X) * nextAlpha
+                            local lookZ = startPivot.Position.Z + (targetStandPos.Z - startPivot.Position.Z) * nextAlpha
+
+                            local currentCFrame = CFrame.lookAt(Vector3.new(rawX, groundY, rawZ), Vector3.new(lookX, groundY, lookZ))
+                            botModel:PivotTo(currentCFrame)
                             task.wait()
                         end
 
                         if not (botModel and botModel.Parent) then break end
 
-                        -- Stay 2 seconds at the egg before picking it up & carrying it back
-                        StopRunAnim()
-                        task.wait(2.0)
+                        StopMoving()
+                        local faceEggCFrame = CFrame.lookAt(botModel:GetPivot().Position, Vector3.new(eggPos.Position.X, botModel:GetPivot().Position.Y, eggPos.Position.Z))
+                        botModel:PivotTo(faceEggCFrame)
+
+                        task.wait(5.0)
 
                         if not (botModel and botModel.Parent) then break end
 
-                        PlayRunAnim()
+                        StartMoving()
                         local carryingEgg = true
+                        isCarryingEgg = true
+
+                        -- Anti-sink carry elevation for giant 5X eggs
+                        local carryLiftY = math.max(4.5, eggHalfHeight + 2.0)
+                        local carryForwardZ = -math.max(6.5, math.min(16.0, eggRadius * 0.7 + 3.0))
+
                         task.spawn(function()
                             while carryingEgg and egg and egg.Parent and botModel and botModel.Parent do
-                                local carryCFrame = botModel:GetPivot() * CFrame.new(0, -0.2, -7.5)
+                                local carryCFrame = botModel:GetPivot() * CFrame.new(0, carryLiftY, carryForwardZ)
                                 if egg:IsA("Model") then
                                     egg:PivotTo(carryCFrame)
                                 elseif egg:IsA("BasePart") then
@@ -1114,23 +1796,31 @@ local function ToggleTeleportBot(targetUsername)
                             end
                         end)
 
-                        travelTime = 2.0 -- Exactly 2 seconds duration to return egg to safezone
+                        local carryStartPivot = botModel:GetPivot()
+                        local distToSafe = (Vector3.new(carryStartPivot.Position.X, 0, carryStartPivot.Position.Z) - Vector3.new(safeCFrame.Position.X, 0, safeCFrame.Position.Z)).Magnitude
+                        local returnTravelTime = math.max(0.4, distToSafe / moveSpeed)
                         startTime = os.clock()
-                        local carryStartPos = botModel:GetPivot()
 
-                        while (os.clock() - startTime) < travelTime and botModel and botModel.Parent do
-                            local alpha = math.min(1, (os.clock() - startTime) / travelTime)
-                            local curPos = carryStartPos.Position:Lerp(safeCFrame.Position, alpha)
-                            local lookCFrame = CFrame.lookAt(curPos, Vector3.new(safeCFrame.Position.X, curPos.Y, safeCFrame.Position.Z))
-                            botModel:PivotTo(lookCFrame)
+                        while (os.clock() - startTime) < returnTravelTime and botModel and botModel.Parent do
+                            local alpha = math.min(1, (os.clock() - startTime) / returnTravelTime)
+                            local rawX = carryStartPivot.Position.X + (safeCFrame.Position.X - carryStartPivot.Position.X) * alpha
+                            local rawZ = carryStartPivot.Position.Z + (safeCFrame.Position.Z - carryStartPivot.Position.Z) * alpha
+                            local groundY = GetGroundHeight(Vector3.new(rawX, carryStartPivot.Position.Y, rawZ), {botModel, CreatedEggsFolder}, 3.0)
+
+                            local nextAlpha = math.min(1, alpha + 0.02)
+                            local lookX = carryStartPivot.Position.X + (safeCFrame.Position.X - carryStartPivot.Position.X) * nextAlpha
+                            local lookZ = carryStartPivot.Position.Z + (safeCFrame.Position.Z - carryStartPivot.Position.Z) * nextAlpha
+
+                            local currentCFrame = CFrame.lookAt(Vector3.new(rawX, groundY, rawZ), Vector3.new(lookX, groundY, lookZ))
+                            botModel:PivotTo(currentCFrame)
                             task.wait()
                         end
 
                         carryingEgg = false
-                        StopRunAnim()
+                        isCarryingEgg = false
+                        StopMoving()
                         task.wait(0.05)
 
-                        -- DISAPPEAR / DESTROY STOLEN EGG IN SAFEZONE
                         if egg and egg.Parent then
                             egg:Destroy()
                         end
@@ -1139,8 +1829,7 @@ local function ToggleTeleportBot(targetUsername)
                     end
                 end
             else
-                -- No target eggs left: auto deactivate bot cleanly
-                StopRunAnim()
+                StopMoving()
                 if botModel and botModel.Parent then
                     botModel:Destroy()
                 end
@@ -1149,13 +1838,12 @@ local function ToggleTeleportBot(targetUsername)
             end
             task.wait(0.2)
         end
-        StopRunAnim()
+        StopMoving()
     end)
 end
 
 ----------------------------------------------------------------
--- FEATURE 3: ANNOUNCE (Matching Game Top Banner)
--- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] : [message]
+-- FEATURE 4: ANNOUNCE (Matching Game Top Banner)
 ----------------------------------------------------------------
 local function ExecAnnounce(msgText)
     if not msgText or msgText == "" then
@@ -1164,17 +1852,16 @@ local function ExecAnnounce(msgText)
     end
 
     local textSegments = {
-        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
-        { Text = ": " .. msgText, Color = Color3.fromRGB(255, 255, 255) }
+        { Text = " : ", Color = Color3.fromRGB(255, 255, 255) },
+        { Text = msgText, Color = Color3.fromRGB(255, 255, 255) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, (ActiveProfile.DisplayName or ActiveProfile.Name), ActiveProfile.IsVerified, textSegments)
     AddLog(string.format("Broadcasted announcement: \"%s: %s\"", ActiveProfile.DisplayName or ActiveProfile.Name, msgText), "SUCCESS")
 end
 
 ----------------------------------------------------------------
--- FEATURE 4: GIVEADMIN (Matching Game Top Banner)
--- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] gave admin to [targetDisplayName]!
+-- FEATURE 5: GIVEADMIN (Matching Game Top Banner)
 ----------------------------------------------------------------
 local function ExecGiveAdmin(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -1186,18 +1873,16 @@ local function ExecGiveAdmin(targetUsername)
     local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
 
     local textSegments = {
-        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
-        { Text = "gave admin to ", Color = Color3.fromRGB(255, 255, 255) },
-        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+        { Text = " gave admin to ", Color = Color3.fromRGB(255, 255, 255) },
+        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(255, 70, 70) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, (ActiveProfile.DisplayName or ActiveProfile.Name), ActiveProfile.IsVerified, textSegments)
     AddLog(string.format("GiveAdminExecuted: '%s' gave admin to '%s'", ActiveProfile.DisplayName or ActiveProfile.Name, targetDisplayName), "ADMIN")
 end
 
 ----------------------------------------------------------------
--- FEATURE 5: GIVEPS (Matching Game Top Banner)
--- Top Banner: [Avatar Headshot] [DisplayName] [Verified Badge if verified] gave private server to [targetDisplayName]!
+-- FEATURE 6: GIVEPS (Matching Game Top Banner)
 ----------------------------------------------------------------
 local function ExecGivePS(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -1209,21 +1894,20 @@ local function ExecGivePS(targetUsername)
     local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
 
     local textSegments = {
-        { Text = (ActiveProfile.DisplayName or ActiveProfile.Name) .. " ", Color = Color3.fromRGB(0, 180, 255) },
-        { Text = "gave private server to ", Color = Color3.fromRGB(255, 255, 255) },
-        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(255, 225, 0) }
+        { Text = " gave private server to ", Color = Color3.fromRGB(255, 255, 255) },
+        { Text = targetDisplayName .. "!", Color = Color3.fromRGB(80, 235, 130) }
     }
 
-    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, ActiveProfile.IsVerified, true, textSegments)
+    ShowGameTopBanner(ActiveProfile.AvatarHeadshot, (ActiveProfile.DisplayName or ActiveProfile.Name), ActiveProfile.IsVerified, textSegments)
     AddLog(string.format("GivePSExecuted: '%s' gave private server to '%s'", ActiveProfile.DisplayName or ActiveProfile.Name, targetDisplayName), "ADMIN")
 end
 
 ----------------------------------------------------------------
--- FEATURE 5: SETPROFILE (Avatar Morph & Identity Change)
+-- FEATURE 7: SETPROFILE & SETVERIFY (Identity & Verification Control)
 ----------------------------------------------------------------
-local function ExecSetProfile(targetUsername)
+local function ExecSetProfile(targetUsername, forceVerify)
     if not targetUsername or targetUsername == "" then
-        AddLog("Usage: setprofile <robloxusername>", "ERROR")
+        AddLog("Usage: setprofile <robloxusername> [true/false]", "ERROR")
         return
     end
 
@@ -1240,21 +1924,30 @@ local function ExecSetProfile(targetUsername)
         ActiveProfile.DisplayName = userRes.DisplayName or userRes.Name
         ActiveProfile.UserId = userRes.UserId
         ActiveProfile.AvatarHeadshot = "rbxthumb://type=AvatarHeadShot&id=" .. userRes.UserId .. "&w=150&h=150"
-        ActiveProfile.IsVerified = userRes.IsVerified  -- Real Roblox API verified status
+        
+        if forceVerify ~= nil then
+            ActiveProfile.IsVerified = (forceVerify == true or tostring(forceVerify):lower() == "true" or tostring(forceVerify):lower() == "on" or tostring(forceVerify):lower() == "1")
+        else
+            ActiveProfile.IsVerified = (userRes.IsVerified == true)
+        end
 
-        AddLog(string.format("Active Profile changed to '%s' (@%s | UserId: %d | Verified: %s)", ActiveProfile.DisplayName, ActiveProfile.Name, userRes.UserId, tostring(ActiveProfile.IsVerified)), "SUCCESS")
+        AddLog(string.format("Active Profile set to '%s' (@%s | Id: %d | Verified Badge: %s)", 
+            ActiveProfile.DisplayName, 
+            ActiveProfile.Name, 
+            userRes.UserId, 
+            ActiveProfile.IsVerified and "ENABLED (ON)" or "DISABLED (OFF)"), "SUCCESS")
     end)
 end
 
 ----------------------------------------------------------------
--- FEATURE 6: SETROLE (Overhead Title: CREATOR=RED, DEVELOPER=BLUE, ADMIN=ORANGE)
+-- FEATURE 8: SETROLE (Overhead Title: CREATOR=RED, DEVELOPER=BLUE, ADMIN=ORANGE)
 ----------------------------------------------------------------
 local CurrentOverheadRole = nil
 
 local RoleColorMap = {
-    CREATOR = Color3.fromRGB(230, 45, 45),    -- RED
-    DEVELOPER = Color3.fromRGB(0, 170, 255),  -- BLUE
-    ADMIN = Color3.fromRGB(255, 140, 0)       -- ORANGE
+    CREATOR = Color3.fromRGB(230, 45, 45),
+    DEVELOPER = Color3.fromRGB(0, 170, 255),
+    ADMIN = Color3.fromRGB(255, 140, 0)
 }
 
 local function ApplyOverheadRole(roleName)
@@ -1326,7 +2019,7 @@ local function ExecSetRole(roleInput)
 end
 
 ----------------------------------------------------------------
--- FEATURE 6: MORPH (Copy Roblox User Avatar)
+-- FEATURE 9: MORPH (Copy Roblox User Avatar)
 ----------------------------------------------------------------
 local function ExecMorph(targetUsername)
     if not targetUsername or targetUsername == "" then
@@ -1356,15 +2049,11 @@ local function ExecMorph(targetUsername)
             return
         end
 
-        -- Method 1: Native ApplyDescription
         pcall(function()
             local humDesc = Players:GetHumanoidDescriptionFromUserId(userRes.UserId)
-            if humDesc then
-                hum:ApplyDescription(humDesc)
-            end
+            if humDesc then hum:ApplyDescription(humDesc) end
         end)
 
-        -- Method 2: Full 3D Asset & Accessory Transfer (Client-Side Guaranteed)
         local okModel, targetModel = pcall(function()
             return Players:CreateHumanoidModelFromUserId(userRes.UserId)
         end)
@@ -1377,21 +2066,18 @@ local function ExecMorph(targetUsername)
                 local charPivot = char:GetPivot()
                 targetModel:PivotTo(charPivot)
 
-                -- Clear existing local character accessories & classic clothing
                 for _, item in ipairs(char:GetChildren()) do
                     if item:IsA("Accessory") or item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") or item:IsA("CharacterMesh") then
                         item:Destroy()
                     end
                 end
 
-                -- Transfer BodyColors, Shirts, Pants, ShirtGraphic, CharacterMeshes
                 for _, item in ipairs(targetModel:GetChildren()) do
                     if item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") or item:IsA("CharacterMesh") then
                         item:Clone().Parent = char
                     end
                 end
 
-                -- Transfer Head face decal and head mesh (SpecialMesh)
                 local head = char:FindFirstChild("Head")
                 local targetHead = targetModel:FindFirstChild("Head")
 
@@ -1411,7 +2097,6 @@ local function ExecMorph(targetUsername)
                     end
                 end
 
-                -- Transfer MeshPart visuals for body parts (R15 / Rthro / Packages)
                 for _, targetPart in ipairs(targetModel:GetChildren()) do
                     if targetPart:IsA("MeshPart") and char:FindFirstChild(targetPart.Name) then
                         local charPart = char[targetPart.Name]
@@ -1426,12 +2111,10 @@ local function ExecMorph(targetUsername)
                     end
                 end
 
-                -- Transfer ALL 3D Accessories (Hats, Hair, Back items, Face, etc.)
                 for _, item in ipairs(targetModel:GetChildren()) do
                     if item:IsA("Accessory") then
                         local accClone = item:Clone()
 
-                        -- Clean up any existing/stale welds inside the clone
                         for _, desc in ipairs(accClone:GetDescendants()) do
                             if desc:IsA("Weld") or desc:IsA("WeldConstraint") or desc:IsA("Motor6D") then
                                 desc:Destroy()
@@ -1474,13 +2157,11 @@ local function ExecMorph(targetUsername)
                                 end
                             end
 
-                            -- Parent directly to Character so Roblox Humanoid renders & recognizes 3D accessories
                             accClone.Parent = char
                         end
                     end
                 end
 
-                -- Synchronize Humanoid Body Scale values
                 local targetHum = targetModel:FindFirstChildOfClass("Humanoid")
                 if targetHum then
                     for _, prop in ipairs({"HeadScale", "BodyHeightScale", "BodyWidthScale", "BodyDepthScale", "BodyTypeScale", "Proportion"}) do
@@ -1503,27 +2184,634 @@ local function ExecMorph(targetUsername)
 end
 
 ----------------------------------------------------------------
--- FEATURE 7: HELP MANUAL & COMMAND PROCESSOR
+-- FEATURE 11: FOLLOWME BOT (Realistic Player Follower, Overhead DisplayName & Verify, Jump AI)
+----------------------------------------------------------------
+local ActiveFollowerBot = nil
+local FollowerBotLoopActive = false
+local FollowerNoCollideConn = nil
+
+local function AttachFollowerOverhead(botModel, displayName, isVerified)
+    local head = botModel:FindFirstChild("Head") or botModel.PrimaryPart
+    if not head then return end
+
+    local existing = head:FindFirstChild("Follower_Overhead")
+    if existing then existing:Destroy() end
+
+    -- Hide Roblox default humanoid nametag so only our custom nametag displays
+    local hum = botModel:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+    end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "Follower_Overhead"
+    bb.Size = UDim2.new(0, 300, 0, 40)
+    bb.StudsOffset = Vector3.new(0, 2.8, 0)
+    bb.AlwaysOnTop = true
+    bb.MaxDistance = 150
+    bb.Adornee = head
+    bb.ResetOnSpawn = false
+    bb.Parent = head
+
+    local row = Instance.new("Frame")
+    row.Name = "NametagRow"
+    row.Size = UDim2.new(1, 0, 1, 0)
+    row.BackgroundTransparency = 1
+    row.Parent = bb
+
+    local rowList = Instance.new("UIListLayout")
+    rowList.FillDirection = Enum.FillDirection.Horizontal
+    rowList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    rowList.VerticalAlignment = Enum.VerticalAlignment.Center
+    rowList.SortOrder = Enum.SortOrder.LayoutOrder
+    rowList.Padding = UDim.new(0, 6)
+    rowList.Parent = row
+
+    -- ONLY 'Sammy' (or chosen display name) in nametag
+    local cleanName = displayName or "Sammy"
+    if cleanName:lower() == "sammy" then
+        cleanName = "Sammy"
+    end
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "DisplayName"
+    nameLabel.AutomaticSize = Enum.AutomaticSize.X
+    nameLabel.Size = UDim2.new(0, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Text = cleanName
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 18
+    nameLabel.LayoutOrder = 1
+    nameLabel.Parent = row
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 2.5
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+    stroke.Parent = nameLabel
+
+    -- Verified badge directly after the nametag
+    if isVerified == true or cleanName:lower():find("sammy") then
+        local badge = Instance.new("TextLabel")
+        badge.Name = "VerifiedBadge"
+        badge.AutomaticSize = Enum.AutomaticSize.X
+        badge.Size = UDim2.new(0, 0, 1, 0)
+        badge.BackgroundTransparency = 1
+        badge.Font = Enum.Font.BuilderSansExtraBold
+        badge.Text = utf8.char(0xE000)
+        badge.TextColor3 = Color3.fromRGB(0, 162, 255)
+        badge.TextSize = 18
+        badge.LayoutOrder = 2
+        badge.Parent = row
+
+        local bStroke = Instance.new("UIStroke")
+        bStroke.Color = Color3.fromRGB(0, 0, 0)
+        bStroke.Thickness = 2
+        bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        bStroke.Parent = badge
+    end
+end
+
+local function AttachFollowerTrail(botModel)
+    local hrp = botModel:FindFirstChild("HumanoidRootPart") or botModel.PrimaryPart
+    if not hrp then return end
+
+    local existing = hrp:FindFirstChild("FollowerTrail")
+    if existing then existing:Destroy() end
+
+    local att0 = hrp:FindFirstChild("FollowerTrailAtt0")
+    if not att0 then
+        att0 = Instance.new("Attachment")
+        att0.Name = "FollowerTrailAtt0"
+        att0.Position = Vector3.new(0, 0.9, 0)
+        att0.Parent = hrp
+    end
+
+    local att1 = hrp:FindFirstChild("FollowerTrailAtt1")
+    if not att1 then
+        att1 = Instance.new("Attachment")
+        att1.Name = "FollowerTrailAtt1"
+        att1.Position = Vector3.new(0, -1.2, 0)
+        att1.Parent = hrp
+    end
+
+    local trail = Instance.new("Trail")
+    trail.Name = "FollowerTrail"
+    trail.Attachment0 = att0
+    trail.Attachment1 = att1
+    trail.FaceCamera = true
+    trail.Lifetime = 0.55
+    trail.MinLength = 0.05
+    trail.LightEmission = 0.8
+    trail.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 190, 255)),
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(120, 225, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+    })
+    trail.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.15),
+        NumberSequenceKeypoint.new(0.7, 0.55),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    trail.WidthScale = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1.3),
+        NumberSequenceKeypoint.new(1, 0.05)
+    })
+    trail.Parent = hrp
+end
+
+local function ExecFollowMe(targetUsername)
+    if not targetUsername or targetUsername == "" then
+        targetUsername = "Sammy"
+    end
+
+    local cleanTarget = targetUsername:lower():gsub("%s+", "")
+    if cleanTarget == "clear" or cleanTarget == "stop" or cleanTarget == "remove" then
+        FollowerBotLoopActive = false
+        if FollowerNoCollideConn then
+            FollowerNoCollideConn:Disconnect()
+            FollowerNoCollideConn = nil
+        end
+        if ActiveFollowerBot and ActiveFollowerBot.Parent then
+            ActiveFollowerBot:Destroy()
+        end
+        ActiveFollowerBot = nil
+        AddLog("Follower bot dismissed.", "WARNING")
+        return
+    end
+
+    -- Dismiss previous follower if any
+    FollowerBotLoopActive = false
+    if FollowerNoCollideConn then
+        FollowerNoCollideConn:Disconnect()
+        FollowerNoCollideConn = nil
+    end
+    if ActiveFollowerBot and ActiveFollowerBot.Parent then
+        ActiveFollowerBot:Destroy()
+    end
+    ActiveFollowerBot = nil
+
+    AddLog(string.format("Looking up player '%s' for FollowMe bot...", targetUsername), "INFO")
+
+    task.spawn(function()
+        local userRes = ResolveUser(targetUsername)
+        local targetName = userRes and userRes.Name or targetUsername
+        local targetDisplayName = userRes and (userRes.DisplayName or userRes.Name) or targetUsername
+        local targetUserId = userRes and userRes.UserId or LocalPlayer.UserId
+        local isVerified = userRes and (userRes.IsVerified == true) or false
+
+        if targetUsername:lower():find("sammy") or targetName:lower():find("sammy") then
+            targetDisplayName = "Sammy"
+            isVerified = true
+        end
+
+        local avatarUrl = "rbxthumb://type=AvatarHeadShot&id=" .. targetUserId .. "&w=150&h=150"
+
+        local playerChar = LocalPlayer.Character
+        local playerHrp = playerChar and playerChar:FindFirstChild("HumanoidRootPart")
+        if not playerHrp then
+            AddLog("Player HumanoidRootPart not found!", "ERROR")
+            return
+        end
+
+        local spawnCFrame = playerHrp.CFrame * CFrame.new(math.random(-4, 4), 0, 6)
+        local botModel = CreateBotCharacter(spawnCFrame, targetName, targetUserId)
+        botModel.Parent = workspace
+        ActiveFollowerBot = botModel
+        FollowerBotLoopActive = true
+
+        -- Guarantee CanCollide = false on all follower bot parts immediately & every physics frame
+        for _, p in ipairs(botModel:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.CanTouch = false
+                p.CanQuery = false
+            end
+        end
+
+        local botHum = botModel:FindFirstChildOfClass("Humanoid")
+        if botHum then
+            pcall(function()
+                botHum:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+                botHum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                botHum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+            end)
+        end
+
+        FollowerNoCollideConn = RunService.Stepped:Connect(function()
+            if not FollowerBotLoopActive or not botModel or not botModel.Parent then
+                if FollowerNoCollideConn then
+                    FollowerNoCollideConn:Disconnect()
+                    FollowerNoCollideConn = nil
+                end
+                return
+            end
+            for _, p in ipairs(botModel:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    if p.CanCollide then p.CanCollide = false end
+                    if p.CanTouch then p.CanTouch = false end
+                    if p.CanQuery then p.CanQuery = false end
+                end
+            end
+            if CreatedEggsFolder then
+                for _, egg in ipairs(CreatedEggsFolder:GetChildren()) do
+                    for _, ep in ipairs(egg:GetDescendants()) do
+                        if ep:IsA("BasePart") then
+                            if ep.CanCollide then ep.CanCollide = false end
+                            if ep.CanTouch then ep.CanTouch = false end
+                            if ep.CanQuery then ep.CanQuery = false end
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- Attach Overhead Name + Verified Badge right after it (Only name and verified badge)
+        AttachFollowerOverhead(botModel, targetDisplayName, isVerified)
+
+        -- Attach Runner Trail
+        AttachFollowerTrail(botModel)
+
+        -- Silent spawn (No announcement banner)
+        AddLog(string.format("Follower bot '%s' (Verified: %s) is now following you!", targetDisplayName, tostring(isVerified)), "SUCCESS")
+
+        local leftHip = botModel:FindFirstChild("Left Hip", true) or botModel:FindFirstChild("LeftHip", true)
+        local rightHip = botModel:FindFirstChild("Right Hip", true) or botModel:FindFirstChild("RightHip", true)
+        local leftShoulder = botModel:FindFirstChild("Left Shoulder", true) or botModel:FindFirstChild("LeftShoulder", true)
+        local rightShoulder = botModel:FindFirstChild("Right Shoulder", true) or botModel:FindFirstChild("RightShoulder", true)
+
+        local isRunning = false
+        local isJumping = false
+        local jumpStartTime = 0
+        local jumpDuration = 0.55
+        local jumpHeight = 4.8
+        local nextRandomJumpTime = os.clock() + math.random(8, 15)
+        local strideAngle = 0
+        local curWalkSpeed = 60.0
+
+        -- Procedural Animation Loop (Running, Jumping, Idle)
+        task.spawn(function()
+            while FollowerBotLoopActive and botModel and botModel.Parent do
+                if isJumping then
+                    -- Jump pose
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(math.rad(40), 0, math.rad(-15)) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(math.rad(40), 0, math.rad(15)) end
+                    if leftHip then leftHip.Transform = CFrame.Angles(math.rad(-22), 0, 0) end
+                    if rightHip then rightHip.Transform = CFrame.Angles(math.rad(-14), 0, 0) end
+                elseif isRunning then
+                    -- Stride matches teleport bot running speed (0.42 stride)
+                    strideAngle = strideAngle + 0.42
+                    local legSwing = math.sin(strideAngle) * 0.8
+                    local armSwing = -math.sin(strideAngle) * 0.7
+
+                    if leftHip then leftHip.Transform = CFrame.Angles(legSwing, 0, 0) end
+                    if rightHip then rightHip.Transform = CFrame.Angles(-legSwing, 0, 0) end
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(armSwing, 0, 0) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(-armSwing, 0, 0) end
+                else
+                    -- Subtle natural idle breathing sway so he looks alive
+                    local breathe = math.sin(os.clock() * 2.2) * 0.04
+                    if leftHip then leftHip.Transform = CFrame.new() end
+                    if rightHip then rightHip.Transform = CFrame.new() end
+                    if leftShoulder then leftShoulder.Transform = CFrame.Angles(breathe, 0, -breathe * 0.4) end
+                    if rightShoulder then rightShoulder.Transform = CFrame.Angles(-breathe, 0, breathe * 0.4) end
+                end
+                task.wait(0.016)
+            end
+        end)
+
+        local function TriggerJump()
+            if not isJumping then
+                isJumping = true
+                jumpStartTime = os.clock()
+                pcall(function()
+                    local snd = Instance.new("Sound")
+                    snd.SoundId = "rbxassetid://6026986407"
+                    snd.Volume = 0.35
+                    snd.Parent = SoundService
+                    snd:Play()
+                    snd.Ended:Connect(function() snd:Destroy() end)
+                end)
+            end
+        end
+
+        local isStoppedAtPlayer = false
+        local lastClock = os.clock()
+        local pathHistory = {}
+        local lastRecordPos = nil
+        local wasPlayerMoving = false
+        local moveReactionTime = 0
+        local jumpDebounce = false
+
+        -- AFK Lively Idle AI (Constantly walking around & jumping around you while you are AFK)
+        local playerStoppedTime = 0
+        local wanderAngle = math.random() * math.pi * 2
+        local currentWaypoint = nil
+        local isWandering = false
+        local nextWanderTime = 0
+        local nextIdleHopTime = 0
+        local lastAfkLookTarget = nil
+
+        -- Realistic Player AI Following Loop (Teleport Bot Speed = 60 studs/s, Trail, Breadcrumb Path, No Circling)
+        while FollowerBotLoopActive and botModel and botModel.Parent do
+            local now = os.clock()
+            local dt = now - lastClock
+            lastClock = now
+            if dt <= 0 or dt > 0.1 then dt = 0.016 end
+
+            local myChar = LocalPlayer.Character
+            local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+
+            if myHrp and myHum and myHum.Health > 0 then
+                local botPivot = botModel:GetPivot()
+                local botPos = botPivot.Position
+                local playerPos = myHrp.Position
+
+                -- Movement speed matches the Teleport Bot exactly (60 studs/s)
+                local runSpeed = 60.0
+                curWalkSpeed = runSpeed
+
+                -- Detect if player is actually moving
+                local playerMoving = (myHum.MoveDirection.Magnitude > 0.05)
+                    or (Vector3.new(myHrp.AssemblyLinearVelocity.X, 0, myHrp.AssemblyLinearVelocity.Z).Magnitude > 1.2)
+
+                -- Track player stopped / AFK state
+                if playerMoving then
+                    playerStoppedTime = 0
+                    isWandering = false
+                    currentWaypoint = nil
+                    nextWanderTime = 0
+                else
+                    if playerStoppedTime == 0 then
+                        playerStoppedTime = now
+                        nextWanderTime = now + 1.0 -- starts walking around after just 1 second!
+                        nextIdleHopTime = now + 1.8
+                        isWandering = false
+                        currentWaypoint = nil
+                    end
+                end
+
+                -- Record player's breadcrumb path as they walk
+                if playerMoving then
+                    if not lastRecordPos or (Vector3.new(playerPos.X - lastRecordPos.X, 0, playerPos.Z - lastRecordPos.Z).Magnitude > 0.4) then
+                        lastRecordPos = playerPos
+                        table.insert(pathHistory, {pos = playerPos, t = now})
+                        while #pathHistory > 1 and (now - pathHistory[1].t > 4.0) do
+                            table.remove(pathHistory, 1)
+                        end
+                    end
+                end
+
+                -- Human Reaction Latency: When player starts moving from a standstill, bot has a slight reaction delay (~0.32s - 0.5s)
+                if playerMoving then
+                    if not wasPlayerMoving then
+                        wasPlayerMoving = true
+                        moveReactionTime = now + (math.random(32, 50) * 0.01)
+                    end
+                else
+                    wasPlayerMoving = false
+                end
+
+                -- Human-like delayed jump imitation (~0.22 - 0.38s lag) ONLY while player is actively moving
+                if playerMoving and (myHum.Jump or myHum:GetState() == Enum.HumanoidStateType.Jumping) and not jumpDebounce then
+                    jumpDebounce = true
+                    task.delay(math.random(22, 38) * 0.01, function()
+                        if FollowerBotLoopActive and botModel and botModel.Parent then
+                            local cChar = LocalPlayer.Character
+                            local cHum = cChar and cChar:FindFirstChildOfClass("Humanoid")
+                            local cHrp = cChar and cChar:FindFirstChild("HumanoidRootPart")
+                            local isStillMoving = cHum and cHrp and (
+                                (cHum.MoveDirection.Magnitude > 0.05) or 
+                                (Vector3.new(cHrp.AssemblyLinearVelocity.X, 0, cHrp.AssemblyLinearVelocity.Z).Magnitude > 1.2)
+                            )
+                            if isStillMoving then
+                                TriggerJump()
+                            end
+                        end
+                        task.wait(0.5)
+                        jumpDebounce = false
+                    end)
+                end
+
+                -- Occasional casual jump ONLY while player is actively moving and running
+                if playerMoving and isRunning and now >= nextRandomJumpTime then
+                    TriggerJump()
+                    nextRandomJumpTime = now + math.random(10, 20)
+                end
+
+                -- Calculate jump height offset
+                local jumpY = 0
+                if isJumping then
+                    local elapsed = now - jumpStartTime
+                    if elapsed < jumpDuration then
+                        local progress = elapsed / jumpDuration
+                        jumpY = math.sin(progress * math.pi) * jumpHeight
+                    else
+                        isJumping = false
+                        jumpY = 0
+                    end
+                end
+
+                local flatBotToPlayer = Vector3.new(playerPos.X - botPos.X, 0, playerPos.Z - botPos.Z)
+                local directPlayerDist = flatBotToPlayer.Magnitude
+
+                -- STOPPING & WALKING BEHAVIOR:
+                -- 1. Player is NOT moving (Standing still or AFK):
+                if not playerMoving then
+                    pathHistory = {} -- clear delayed footsteps so bot doesn't chase ghosts
+
+                    if directPlayerDist > 9.5 then
+                        -- Player is far away: Walk directly toward player until entering personal distance (6.5 studs)
+                        isWandering = false
+                        currentWaypoint = nil
+                        isStoppedAtPlayer = false
+                        isRunning = true
+                        curWalkSpeed = runSpeed
+
+                        local moveDir = flatBotToPlayer.Unit
+                        local stepDist = math.min(directPlayerDist - 6.5, runSpeed * dt)
+                        if stepDist > 0 then
+                            local newX = botPos.X + moveDir.X * stepDist
+                            local newZ = botPos.Z + moveDir.Z * stepDist
+                            local groundY = GetGroundHeight(Vector3.new(newX, botPos.Y, newZ), {botModel, myChar, CreatedEggsFolder}, 3.0)
+                            local lookAhead = Vector3.new(newX + moveDir.X * 5, groundY, newZ + moveDir.Z * 5)
+                            botModel:PivotTo(CFrame.lookAt(Vector3.new(newX, groundY, newZ), lookAhead))
+                        else
+                            isRunning = false
+                            isStoppedAtPlayer = true
+                        end
+                    else
+                        -- Player is nearby: ACTIVELY WALK AROUND & JUMP AROUND!
+                        if not isStoppedAtPlayer then
+                            isStoppedAtPlayer = true
+                            local groundY = GetGroundHeight(botPos, {botModel, myChar, CreatedEggsFolder}, 3.0)
+                            if flatBotToPlayer.Magnitude > 0.2 then
+                                local faceTarget = Vector3.new(playerPos.X, groundY, playerPos.Z)
+                                botModel:PivotTo(CFrame.lookAt(Vector3.new(botPos.X, groundY, botPos.Z), faceTarget))
+                            end
+                        end
+
+                        -- After 1 second of standing still, activate continuous lively walking around & jumping!
+                        if (now - playerStoppedTime > 1.0) then
+                            -- Check if we need to pick a new waypoint to walk around the player
+                            if not isWandering then
+                                if now >= nextWanderTime then
+                                    -- Pick a point in a ring around the player (distance 4.8 to 7.0 studs)
+                                    wanderAngle = wanderAngle + (math.random(60, 130) * (math.random() > 0.5 and 1 or -1) * (math.pi / 180))
+                                    local wanderDist = math.random(48, 70) / 10
+                                    currentWaypoint = playerPos + Vector3.new(math.cos(wanderAngle) * wanderDist, 0, math.sin(wanderAngle) * wanderDist)
+                                    isWandering = true
+                                    nextWanderTime = now + 4.5 -- safety timeout
+
+                                    -- High chance to jump as he starts walking! (70% chance)
+                                    if math.random() < 0.70 then
+                                        TriggerJump()
+                                    end
+                                else
+                                    -- Pausing between strolls: frequent casual hops!
+                                    isRunning = false
+                                    if now >= nextIdleHopTime then
+                                        TriggerJump()
+                                        nextIdleHopTime = now + math.random(20, 38) * 0.1 -- hops every 2.0 - 3.8s!
+                                    end
+
+                                    -- Apply jump height even while standing paused
+                                    local groundY = GetGroundHeight(botPos, {botModel, myChar, CreatedEggsFolder}, 3.0)
+                                    local lookDir = lastAfkLookTarget or Vector3.new(playerPos.X, groundY, playerPos.Z)
+                                    botModel:PivotTo(CFrame.lookAt(Vector3.new(botPos.X, groundY + jumpY, botPos.Z), Vector3.new(lookDir.X, groundY + jumpY, lookDir.Z)))
+                                end
+                            end
+
+                            -- Execute active walking to waypoint around the player
+                            if isWandering and currentWaypoint then
+                                local flatWander = Vector3.new(currentWaypoint.X - botPos.X, 0, currentWaypoint.Z - botPos.Z)
+                                if flatWander.Magnitude > 0.5 then
+                                    isRunning = true
+                                    local wanderSpeed = 16.0 -- energetic natural walking pace
+                                    curWalkSpeed = wanderSpeed
+                                    local moveDir = flatWander.Unit
+                                    local stepDist = math.min(flatWander.Magnitude, wanderSpeed * dt)
+                                    local newX = botPos.X + moveDir.X * stepDist
+                                    local newZ = botPos.Z + moveDir.Z * stepDist
+                                    local groundY = GetGroundHeight(Vector3.new(newX, botPos.Y, newZ), {botModel, myChar, CreatedEggsFolder}, 3.0)
+                                    local lookAhead = Vector3.new(newX + moveDir.X * 5, groundY + jumpY, newZ + moveDir.Z * 5)
+                                    lastAfkLookTarget = lookAhead
+                                    botModel:PivotTo(CFrame.lookAt(Vector3.new(newX, groundY + jumpY, newZ), lookAhead))
+                                else
+                                    -- Reached waypoint!
+                                    isWandering = false
+                                    isRunning = false
+                                    currentWaypoint = nil
+                                    nextWanderTime = now + math.random(8, 20) * 0.1 -- pause for only 0.8s to 2.0s!
+                                    nextIdleHopTime = now + math.random(10, 18) * 0.1
+                                    -- Chance to jump upon reaching the spot!
+                                    if math.random() < 0.55 then
+                                        TriggerJump()
+                                    end
+                                end
+                            end
+                        else
+                            isRunning = false
+                        end
+                    end
+                -- 2. Player IS moving: Follow with trail and breadcrumbs
+                else
+                    isWandering = false
+                    currentWaypoint = nil
+                    local isWaitingForReaction = (now < moveReactionTime)
+
+                    if directPlayerDist <= 6.5 or isWaitingForReaction then
+                        isRunning = false
+                        if not isStoppedAtPlayer then
+                            isStoppedAtPlayer = true
+                            local groundY = GetGroundHeight(botPos, {botModel, myChar, CreatedEggsFolder}, 3.0)
+                            if flatBotToPlayer.Magnitude > 0.2 then
+                                local faceTarget = Vector3.new(playerPos.X, groundY, playerPos.Z)
+                                botModel:PivotTo(CFrame.lookAt(Vector3.new(botPos.X, groundY, botPos.Z), faceTarget))
+                            end
+                        end
+                    else
+                        isStoppedAtPlayer = false
+                        isRunning = true
+
+                        local targetTime = now - 0.42
+                        local followTarget = nil
+                        for i = #pathHistory, 1, -1 do
+                            if pathHistory[i].t <= targetTime then
+                                followTarget = pathHistory[i].pos
+                                break
+                            end
+                        end
+                        if not followTarget then
+                            if #pathHistory > 0 then
+                                followTarget = pathHistory[1].pos
+                            else
+                                followTarget = playerPos
+                            end
+                        end
+
+                        local flatDelta = Vector3.new(followTarget.X - botPos.X, 0, followTarget.Z - botPos.Z)
+                        if flatDelta.Magnitude < 1.0 and directPlayerDist > 6.5 then
+                            followTarget = playerPos
+                            flatDelta = Vector3.new(followTarget.X - botPos.X, 0, followTarget.Z - botPos.Z)
+                        end
+
+                        if flatDelta.Magnitude > 0.05 then
+                            local moveDir = flatDelta.Unit
+                            local stepDist = math.min(flatDelta.Magnitude, runSpeed * dt)
+                            local newX = botPos.X + moveDir.X * stepDist
+                            local newZ = botPos.Z + moveDir.Z * stepDist
+                            local groundY = GetGroundHeight(Vector3.new(newX, botPos.Y, newZ), {botModel, myChar, CreatedEggsFolder}, 3.0)
+
+                            local lookAhead = Vector3.new(newX + moveDir.X * 5, groundY + jumpY, newZ + moveDir.Z * 5)
+                            botModel:PivotTo(CFrame.lookAt(Vector3.new(newX, groundY + jumpY, newZ), lookAhead))
+                        end
+                    end
+                end
+            else
+                isRunning = false
+            end
+            task.wait(0.016)
+        end
+
+        isRunning = false
+        isJumping = false
+    end)
+end
+
+----------------------------------------------------------------
+-- FEATURE 10: HELP MANUAL & COMMAND PROCESSOR
 ----------------------------------------------------------------
 local function ExecHelp()
     AddLog("==================== SERVER CONSOLE COMMANDS ====================", "SYSTEM")
     AddLog("1. spawnegg <name> [amount]", "INFO")
-    AddLog("   -> Spawns 2X non-collidable eggs (max 10/row)", "INFO")
-    AddLog("2. teleport <robloxusername>", "INFO")
-    AddLog("   -> Spawns bot that randomly steals eggs back to safezone (use 'teleport clear' to remove all)", "INFO")
-    AddLog("3. announce <message>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] : [message]", "INFO")
-    AddLog("4. giveadmin <robloxusername>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] gave admin to [Target]!", "INFO")
-    AddLog("5. giveps <robloxusername>", "INFO")
-    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge if verified] gave private server to [Target]!", "INFO")
-    AddLog("6. setprofile <robloxusername>", "INFO")
-    AddLog("   -> Sets announcement identity & badge data (fetches real verification status)", "INFO")
-    AddLog("7. setrole <CREATOR | DEVELOPER | ADMIN>", "INFO")
+    AddLog("   -> Spawns elevated non-collidable eggs with pop-in animation (no spawn limit)", "INFO")
+    AddLog("2. mixegg [amount] (or spawnmixegg [amount])", "INFO")
+    AddLog("   -> Spawns Pure Divine & Limited eggs fitting your surrounding area (no spawn limit, default 25)", "INFO")
+    AddLog("3. cleareggs", "INFO")
+    AddLog("   -> Removes all eggs spawned by the console", "INFO")
+    AddLog("4. teleport <robloxusername>", "INFO")
+    AddLog("   -> Bot with random trail, 2X speed ground walking, and 5s steal duration ('teleport clear' to stop)", "INFO")
+    AddLog("5. setverify <on | off>", "INFO")
+    AddLog("   -> Manually toggles verified badge in top banner notifications", "INFO")
+    AddLog("6. announce <message>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge] : [message]", "INFO")
+    AddLog("7. giveadmin <robloxusername>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge] gave admin to [Target]!", "INFO")
+    AddLog("8. giveps <robloxusername>", "INFO")
+    AddLog("   -> Top notification format: [Avatar] [DisplayName] [Verified Badge] gave private server to [Target]!", "INFO")
+    AddLog("9. setprofile <robloxusername> [true/false]", "INFO")
+    AddLog("   -> Sets announcement identity & checks Roblox verified badge status (optional force true/false)", "INFO")
+    AddLog("10. setrole <CREATOR | DEVELOPER | ADMIN>", "INFO")
     AddLog("   -> Displays colored role title overhead above your character", "INFO")
-    AddLog("8. morph <robloxusername>", "INFO")
+    AddLog("11. morph <robloxusername>", "INFO")
     AddLog("   -> Morphs your character avatar into <robloxusername>", "INFO")
-    AddLog("9. /help", "INFO")
+    AddLog("12. followme <robloxusername>", "INFO")
+    AddLog("   -> Spawns animated player follower with display name, verified badge & jumping AI ('followme stop' to dismiss)", "INFO")
+    AddLog("13. /help", "INFO")
     AddLog("   -> Displays this command catalog manual", "INFO")
     AddLog("==================================================================", "SYSTEM")
 end
@@ -1543,15 +2831,55 @@ local function ProcessCommand(fullCmd)
 
     if cmd == "spawnegg" then
         local eggName = args[2] or "Egg"
-        local amount = args[3] or 1
+        local amount = tonumber(args[3]) or 1
+        if eggName:lower() == "clear" or eggName:lower() == "stop" then
+            if CreatedEggsFolder then
+                CreatedEggsFolder:ClearAllChildren()
+                AddLog("Cleared all spawned eggs!", "WARNING")
+            end
+            return
+        end
+        if eggName:lower() == "mix" or eggName:lower() == "mixegg" or eggName:lower() == "spawnmixegg" then
+            SpawnMixEgg(tonumber(args[3]) or 25)
+            return
+        end
         if tonumber(args[2]) and not tonumber(args[3]) then
-            amount = args[2]
-            eggName = args[3]
+            amount = tonumber(args[2]) or 1
+            eggName = args[3] or "Egg"
         end
         FindAndSpawnEgg(eggName, amount)
+    elseif cmd == "spawnmixegg" or cmd == "mixegg" or cmd == "mix" then
+        local arg2 = args[2] and args[2]:lower() or ""
+        if arg2 == "clear" or arg2 == "stop" then
+            if CreatedEggsFolder then
+                CreatedEggsFolder:ClearAllChildren()
+                AddLog("Cleared all spawned eggs!", "WARNING")
+            end
+            return
+        end
+        local amount = tonumber(args[2]) or tonumber(args[3])
+        SpawnMixEgg(amount)
+    elseif cmd == "cleareggs" or cmd == "clearegg" then
+        if CreatedEggsFolder then
+            CreatedEggsFolder:ClearAllChildren()
+            AddLog("Cleared all spawned eggs!", "WARNING")
+        end
+        return
+    elseif cmd == "setverify" or cmd == "verify" then
+        local state = args[2] and args[2]:lower() or ""
+        if state == "off" or state == "false" or state == "disable" or state == "0" then
+            ActiveProfile.IsVerified = false
+            AddLog("Verified badge DISABLED for active profile.", "WARNING")
+        else
+            ActiveProfile.IsVerified = true
+            AddLog("Verified badge ENABLED for active profile!", "SUCCESS")
+        end
     elseif cmd == "teleport" then
         local target = args[2] or ""
         ToggleTeleportBot(target)
+    elseif cmd == "followme" or cmd == "follow" then
+        local target = args[2] or ""
+        ExecFollowMe(target)
     elseif cmd == "announce" then
         local msgText = table.concat(args, " ", 2)
         ExecAnnounce(msgText)
@@ -1563,7 +2891,8 @@ local function ProcessCommand(fullCmd)
         ExecGivePS(target)
     elseif cmd == "setprofile" then
         local target = args[2] or ""
-        ExecSetProfile(target)
+        local forceVerify = args[3]
+        ExecSetProfile(target, forceVerify)
     elseif cmd == "setrole" then
         local roleInput = args[2] or ""
         ExecSetRole(roleInput)
